@@ -1,0 +1,87 @@
+# Publishes a GitHub Release with ready-to-install packages whenever the extension changes on main.
+#
+#   • New version in extension/manifest.json  → creates release "v<version>"
+#   • Same version, code changed               → refreshes that release's files
+#
+# The README links to /releases/latest/download/<file>, so download links never go stale.
+#
+# Optional – one-click Firefox install:
+#   Add repo secrets AMO_JWT_ISSUER and AMO_JWT_SECRET (https://addons.mozilla.org/developers/addon/api/key/)
+#   and each NEW version is also signed by Mozilla as canvax-firefox.xpi.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: ["extension/**", "scripts/build.sh", ".github/workflows/release.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+      AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build packages
+        run: |
+          chmod +x scripts/build.sh
+          ./scripts/build.sh
+          echo "VERSION=$(jq -r .version extension/manifest.json)" >> "$GITHUB_ENV"
+
+      - name: Check for existing release
+        id: existing
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sign Firefox add-on (optional)
+        if: steps.existing.outputs.exists == 'false' && env.AMO_JWT_ISSUER != ''
+        run: |
+          npx --yes web-ext@8 sign \
+            --source-dir build/firefox \
+            --artifacts-dir build/signed \
+            --channel unlisted \
+            --api-key "$AMO_JWT_ISSUER" \
+            --api-secret "$AMO_JWT_SECRET"
+          mv build/signed/*.xpi dist/canvax-firefox.xpi
+
+      - name: Create release
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          if [ -f dist/canvax-firefox.xpi ]; then
+            FF='| Firefox | **canvax-firefox.xpi** | Click it → **Add** (one click, permanent) |'
+          else
+            FF='| Firefox | **canvax-firefox.zip** | `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** → pick the zip |'
+          fi
+          cat > notes.md <<EOF
+          ## Install
+
+          | Browser | Download | Then |
+          |---|---|---|
+          | Chrome · Edge · Brave · Opera · Arc | **canvax-chrome.zip** | Unzip → \`chrome://extensions\` → Developer mode → **Load unpacked** |
+          $FF
+
+          Full guide: [README](https://github.com/${{ github.repository }}#-install)
+          EOF
+          gh release create "v$VERSION" dist/* \
+            --title "Canvax v$VERSION" \
+            --notes-file notes.md \
+            --latest
+
+      - name: Refresh files on existing release
+        if: steps.existing.outputs.exists == 'true'
+        run: gh release upload "v$VERSION" dist/canvax-chrome.zip dist/canvax-firefox.zip --clobber

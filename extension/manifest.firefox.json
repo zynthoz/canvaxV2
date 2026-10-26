@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Canvax",
+  "version": "3.0",
+  "description": "Terminal AI overlay — highlight text, get instant Gemini answers",
+  "permissions": ["activeTab", "clipboardWrite", "scripting", "storage", "tabs"],
+  "host_permissions": ["<all_urls>", "https://generativelanguage.googleapis.com/*"],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["overlay.js"],
+      "run_at": "document_end",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["overlay.css"], "matches": ["<all_urls>"] }
+  ],
+  "action": {
+    "default_title": "Toggle Canvax",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "toggle-overlay": {
+      "suggested_key": { "default": "Alt+Q" },
+      "description": "Toggle overlay"
+    }
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "canvax-assistant@extension",
+      "strict_min_version": "109.0"
+    }
+  }
+}

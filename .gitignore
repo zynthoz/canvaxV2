@@ -1,0 +1,19 @@
+# Build output (published via GitHub Releases instead)
+build/
+dist/
+*.zip
+*.xpi
+*.crx
+*.pem
+
+# Local secrets
+.env
+.env.*
+.amo-upload-uuid
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+node_modules/
