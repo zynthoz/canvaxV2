@@ -19,9 +19,9 @@
   --text-muted: #64748b;
   --text-faint: #94a3b8;
 
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-subtle: #eff6ff;
+  --primary: #e11d48;
+  --primary-hover: #be123c;
+  --primary-subtle: #fff1f2;
 
   --warn: #d97706;
   --warn-bg: #fef3c7;
@@ -43,9 +43,9 @@
   --text-muted: #94a3b8;
   --text-faint: #64748b;
 
-  --primary: #3b82f6;
-  --primary-hover: #60a5fa;
-  --primary-subtle: rgba(59, 130, 246, 0.15);
+  --primary: #fb7185;
+  --primary-hover: #f43f5e;
+  --primary-subtle: rgba(244, 63, 94, 0.18);
 
   --warn: #fbbf24;
   --warn-bg: rgba(251, 191, 36, 0.15);
