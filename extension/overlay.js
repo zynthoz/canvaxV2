@@ -1,4 +1,92 @@
 (() => {
+  // ── Universal Text Highlighting & Selection Unlocker ──────────────────────
+  // Executes immediately across all frames (top-level and iframes) to break through:
+  // 1. CSS user-select: none / -webkit-user-select: none
+  // 2. JavaScript event killers: selectstart, mousedown, mouseup, copy, cut, contextmenu
+  // 3. Inline attributes: onselectstart="return false", oncopy="return false"
+  // 4. Transparent overlay div shields sitting over text (disables pointer-events on empty overlay layers)
+  function unlockPageHighlighting() {
+    try {
+      const styleId = "cx-highlight-unlocker";
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement("style");
+        style.id = styleId;
+        style.textContent = `
+          *, *::before, *::after {
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+            user-select: text !important;
+            -webkit-touch-callout: default !important;
+          }
+          /* Neutralize invisible shields/canvas overlays that block text selection */
+          div[style*="opacity: 0"], div[style*="opacity:0"],
+          .prevent-select, .no-select, .unselectable, .protected-content {
+            -webkit-user-select: text !important;
+            user-select: text !important;
+          }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+      }
+
+      // Neutralize JS-level event cancellation in the capturing phase
+      const unblockEvents = ["selectstart", "mousedown", "mouseup", "copy", "cut", "contextmenu", "dragstart"];
+      unblockEvents.forEach(evt => {
+        window.addEventListener(evt, e => {
+          // If the page's event listener tries to prevent selection/copying, stop it
+          if (e.target && !e.target.closest?.("#cx-host")) {
+            e.stopPropagation ? e.stopPropagation() : null;
+          }
+        }, true);
+      });
+
+      // Clear inline HTML attribute blocks (e.g. <body onselectstart="return false">)
+      function clearInlineBlocks() {
+        if (!document.body) return;
+        const inlineAttrs = ["onselectstart", "oncopy", "oncut", "oncontextmenu", "ondragstart", "onmousedown"];
+        [document.body, document.documentElement].forEach(target => {
+          if (!target) return;
+          inlineAttrs.forEach(attr => {
+            if (target.hasAttribute(attr)) target.removeAttribute(attr);
+            if (target[attr]) target[attr] = null;
+          });
+        });
+      }
+
+      clearInlineBlocks();
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", clearInlineBlocks, { once: true });
+      }
+
+      // Detect and neutralize transparent blocker elements floating over content
+      function neutraliseOverlays() {
+        const potentialShields = document.querySelectorAll("div, span");
+        potentialShields.forEach(el => {
+          if (el.id === "cx-host" || el.closest("#cx-host")) return;
+          const cs = window.getComputedStyle ? getComputedStyle(el) : null;
+          if (cs && (cs.position === "absolute" || cs.position === "fixed")) {
+            const z = parseInt(cs.zIndex, 10);
+            const isTransparent = cs.opacity === "0" || cs.backgroundColor === "rgba(0, 0, 0, 0)" || cs.backgroundColor === "transparent";
+            const hasNoDirectText = !el.innerText || !el.innerText.trim();
+            // If it's a floating transparent layer with high z-index and no text, disable its pointer events
+            if (z > 10 && isTransparent && hasNoDirectText && el.children.length === 0) {
+              el.style.pointerEvents = "none";
+            }
+          }
+        });
+      }
+
+      if (document.readyState === "complete" || document.readyState === "interactive") {
+        neutraliseOverlays();
+      } else {
+        window.addEventListener("load", neutraliseOverlays, { once: true });
+      }
+    } catch {}
+  }
+
+  // Run immediately on script evaluation
+  unlockPageHighlighting();
+
   const isTopFrame = window.self === window.top;
   const IDLE_MS = 1500, MIN_CHARS = 3, MAX_CHARS = 8000;
 
@@ -562,37 +650,6 @@
     walk(root);
     return out.replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, MAX_CHARS);
   }
-
-  // ── Unblock Anti-Accessibility Restrictions on Page ─────────────────────
-  // Strips CSS and JS blocks that prevent text selection, inspection, or copying
-  function unlockPageAccessibility() {
-    try {
-      const unblockStyle = document.getElementById("cx-unblock-style");
-      if (!unblockStyle) {
-        const style = document.createElement("style");
-        style.id = "cx-unblock-style";
-        style.textContent = `
-          *, *::before, *::after {
-            -webkit-user-select: text !important;
-            -moz-user-select: text !important;
-            -ms-user-select: text !important;
-            user-select: text !important;
-            pointer-events: auto !important;
-          }
-        `;
-        (document.head || document.documentElement).appendChild(style);
-      }
-
-      // Bypass JavaScript event cancellers on copy, selectstart, contextmenu
-      ["copy", "cut", "selectstart", "contextmenu"].forEach(evt => {
-        window.addEventListener(evt, e => e.stopImmediatePropagation(), true);
-        document.addEventListener(evt, e => e.stopImmediatePropagation(), true);
-      });
-    } catch {}
-  }
-
-  // Run unblocker so users can always select & screen-read without hindrance
-  unlockPageAccessibility();
 
   function extractContext(container) {
     return container ? serialize(container) : "";
