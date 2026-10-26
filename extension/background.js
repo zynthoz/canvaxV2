@@ -73,6 +73,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     return true;
   }
+
+  // Visual capture fallback: when text is hidden inside Canvas, SVG, or scrambled fonts
+  if (msg.type === "CAPTURE_SCREEN") {
+    chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 80 }, dataUrl => {
+      if (chrome.runtime.lastError || !dataUrl) {
+        sendResponse({ ok: false, error: chrome.runtime.lastError?.message || "capture failed" });
+      } else {
+        // Strip data:image/jpeg;base64,
+        const base64 = dataUrl.split(",")[1];
+        sendResponse({ ok: true, base64: base64, mimeType: "image/jpeg" });
+      }
+    });
+    return true;
+  }
 });
 
 // ── Streaming port ──────────────────────────────────────────────────────
@@ -93,7 +107,7 @@ chrome.runtime.onConnect.addListener(port => {
   port.onDisconnect.addListener(() => { gone = true; ctrl.abort(); });
   port.onMessage.addListener(msg => {
     if (msg.type !== "ASK") return;
-    streamGemini(msg.text, HARDCODED_KEY || msg.apiKey, ctrl.signal, post)
+    streamGemini(msg.text, HARDCODED_KEY || msg.apiKey, ctrl.signal, post, msg.image)
       .catch(err => post({ type: "error", message: err?.message || "unknown error" }));
   });
 });
@@ -349,10 +363,21 @@ function race(order, body, apiKey, signal, post) {
 }
 
 // ── Call Google Gemini (streaming, routed across MODELS) ────────────────
-async function streamGemini(userText, apiKey, signal, post) {
+async function streamGemini(userText, apiKey, signal, post, image = null) {
+  const parts = [];
+  if (image && image.base64) {
+    parts.push({
+      inlineData: {
+        mimeType: image.mimeType || "image/jpeg",
+        data: image.base64
+      }
+    });
+  }
+  parts.push({ text: userText });
+
   const body = JSON.stringify({
     systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-    contents: [{ role: "user", parts: [{ text: userText }] }],
+    contents: [{ role: "user", parts: parts }],
     generationConfig: { temperature: 0.2, maxOutputTokens: 4096 }
   });
   const why = e =>

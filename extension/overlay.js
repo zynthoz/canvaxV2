@@ -630,9 +630,36 @@
   });
 
   // ── Screen mode: extract questions from page ───────────────────────────
-  function scanPage() {
+  // First tries DOM unmasking. If the page is heavily canvas/image/svg based,
+  // or text content is blank/scrambled, it automatically falls back to visual OCR.
+  async function scanPage() {
     const text = serialize(document.body);
     const preview = text.replace(/\s+/g, " ");
+    
+    // Check if the DOM appears stripped or obfuscated (e.g. Canvas/SVG heavy or < 25 chars)
+    const hasCanvasOrSvg = document.querySelectorAll("canvas, svg").length > 0;
+    const looksObfuscated = text.length < 25 || (hasCanvasOrSvg && text.length < 100);
+
+    if (looksObfuscated) {
+      setStatus("visual scan in progress...");
+      chrome.runtime.sendMessage({ type: "CAPTURE_SCREEN" }, res => {
+        if (res?.ok && res.base64) {
+          const imgPrompt = text.length > 5 
+            ? `NOTE: The page has HTML content but may be visual or obfuscated:\n${text}`
+            : "The page content is visually rendered (canvas, SVG, or image). Read the visible question(s) and answers in the image.";
+          setPreview("Visual Screen Scan");
+          lastText = text || "visual_scan";
+          ask(imgPrompt, false, { base64: res.base64, mimeType: res.mimeType });
+        } else {
+          // Fall back to standard DOM text if capture is unavailable
+          setPreview(preview || "Screen Scan");
+          lastText = text;
+          ask(text);
+        }
+      });
+      return;
+    }
+
     setPreview(preview);
     lastText = text;
     ask(text);
@@ -879,7 +906,7 @@
   }
 
   // ── Ask Gemini ──────────────────────────────────────────────────────────
-  async function ask(text, fresh = false) {
+  async function ask(text, fresh = false, image = null) {
     if (!apiKey) { showSetup(); return; }
     cancelRequest();
     const id = reqId;
@@ -892,7 +919,7 @@
     setTag();
 
     const prompt = buildPrompt(text);
-    const ckey = hash(prompt);
+    const ckey = hash(prompt + (image?.base64 ? "_img" : ""));
     const meta = parseOptions(text);
 
     if (!fresh) {
@@ -960,7 +987,7 @@
         else setStatus("err: connection lost — highlight again");
       });
 
-      p.postMessage({ type: "ASK", text: prompt, apiKey });
+      p.postMessage({ type: "ASK", text: prompt, apiKey, image });
     }
 
     connect();
