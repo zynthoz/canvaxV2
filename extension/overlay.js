@@ -427,45 +427,85 @@
   const PLACEHOLDER = /^(\[?\s*(choose|select|pick)\b.*\]?|[-—–.]+)$/i;
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "OPTION"]);
 
-  // Serialize the DOM to text in reading order. Dropdowns are emitted IN PLACE,
-  // tagged with the item label that precedes them and with every option listed
-  // verbatim, so the model can pair each item with an exact option.
+  // ── Anti-Obfuscation DOM Unmasker & Serializer ──────────────────────────
+  // Reads content faithfully even when pages attempt obfuscation via:
+  // - user-select: none, pointer-events: none, contextmenu/copy blocking
+  // - font-size: 0px, opacity: 0, offscreen absolute positioning, color: transparent
+  // - Open Shadow DOMs and custom web components
+  // - Canvas/Image/SVG math & diagrams (aria-label, alt, title)
+  // - CSS ::before and ::after pseudo-content injected terms
+  // - Scrambled or empty markup that relies on accessible ARIA trees
   function serialize(root) {
     let out = "", ddCount = 0, lastLabel = "";
     const nl = () => { if (out && !out.endsWith("\n")) out += "\n"; };
 
+    function cleanStr(s) {
+      return (s || "").replace(/[\u200B-\u200D\uFEFF]/g, "").replace(/\s+/g, " ");
+    }
+
     function walk(n) {
       if (typeof host !== "undefined" && host && n === host) return;
 
+      // Text Node
       if (n.nodeType === 3) {
-        const t = n.textContent.replace(/\s+/g, " ");
-        // Don't let pure punctuation or connector lines (e.g. "------" or "· · ·") overwrite a real term label
-        if (t.trim() && !/^[\s\-_.:·—–]+$/.test(t.trim())) {
-          out += t;
-          lastLabel = t.trim();
+        const raw = cleanStr(n.textContent);
+        if (raw.trim() && !/^[\s\-_.:·—–]+$/.test(raw.trim())) {
+          out += raw;
+          lastLabel = raw.trim();
         }
         return;
       }
+
       if (n.nodeType !== 1 || SKIP_TAGS.has(n.tagName)) return;
 
-      const cs = getComputedStyle(n);
-      // Don't skip <select> even if visually hidden by a styling framework
-      if (n.tagName !== "SELECT" && (cs.display === "none" || cs.visibility === "hidden")) return;
-      const block = !cs.display.startsWith("inline");
+      const cs = window.getComputedStyle ? getComputedStyle(n) : null;
+
+      // Anti-obfuscation check:
+      // Even if display is none or visibility is hidden, inspect whether it holds critical quiz/text data
+      // (often hidden by anti-reader scripts, tab-switch detectors, or custom modal disguises).
+      const isHidden = cs && (cs.display === "none" || cs.visibility === "hidden");
+      const hasAccessibilityLabel = n.getAttribute("aria-label") || n.getAttribute("alt") || n.getAttribute("title");
+
+      // Extract ARIA / accessible description if element is an image/math/svg or has rich aria
+      if (hasAccessibilityLabel && (n.tagName === "IMG" || n.tagName === "SVG" || n.tagName === "CANVAS" || isHidden)) {
+        const alt = cleanStr(hasAccessibilityLabel).trim();
+        if (alt && !/^[\s\-_.:·—–]+$/.test(alt)) {
+          nl();
+          out += alt + " ";
+          lastLabel = alt;
+        }
+      }
+
+      // Check for CSS generated pseudo-content (often used to render question numbers or terms)
+      if (cs) {
+        const before = cs.getPropertyValue("content");
+        if (before && before !== "none" && before !== "normal") {
+          const bText = cleanStr(before.replace(/^['"]|['"]$/g, "")).trim();
+          if (bText) out += bText + " ";
+        }
+      }
+
+      // Don't completely skip hidden containers if they contain actual inputs/selects or forms
+      if (isHidden && n.tagName !== "SELECT" && !n.querySelector("select, input, textarea")) {
+        // If it's a hidden span/div with meaningful text used to bypass display, read textContent if not script/style
+        const hiddenTxt = cleanStr(n.textContent).trim();
+        if (hiddenTxt.length > 2 && (n.className?.includes("math") || n.className?.includes("katex") || n.className?.includes("sr-only") || n.className?.includes("visually-hidden"))) {
+          nl();
+          out += hiddenTxt + " ";
+        }
+        return;
+      }
+
+      const block = cs ? !cs.display.startsWith("inline") : true;
       if (block) nl();
 
       if (n.tagName === "SELECT") {
-        // Try multiple ways to identify which item this dropdown belongs to:
-        // 1) aria-label or title
-        // 2) associated <label>
-        // 3) closest row's left-hand term
-        // 4) last seen label
         let itemLabel = n.getAttribute("aria-label")?.trim() || n.title?.trim() || n.labels?.[0]?.textContent?.trim();
         if (!itemLabel) {
           const row = n.closest(".row, tr, [class*='row'], [class*='match'], [class*='item'], div");
           const left = row?.querySelector("[class*='left'], [class*='term'], [class*='label'], [class*='stem'], [class*='header']");
           if (left && left !== n) {
-            const lt = left.textContent.replace(/\s+/g, " ").trim();
+            const lt = cleanStr(left.textContent).trim();
             if (lt && !/^[\s\-_.:·—–]+$/.test(lt)) itemLabel = lt;
           }
         }
@@ -475,10 +515,10 @@
 
         const seen = new Set();
         const opts = Array.from(n.options)
-          .map(o => o.textContent.replace(/\s+/g, " ").trim())
+          .map(o => cleanStr(o.textContent).trim())
           .filter(t => t && !PLACEHOLDER.test(t) && !seen.has(t) && seen.add(t));
         if (opts.length) {
-          const cur = n.options[n.selectedIndex]?.textContent.replace(/\s+/g, " ").trim();
+          const cur = cleanStr(n.options[n.selectedIndex]?.textContent).trim();
           nl();
           out += `[Dropdown #${++ddCount}${itemLabel ? ` for item "${itemLabel}"` : ""} — choose exactly one of:\n` +
             opts.map((o, i) => `  ${i + 1}. ${o}`).join("\n") +
@@ -501,13 +541,58 @@
       }
       if (n.tagName === "BR") { nl(); return; }
 
-      n.childNodes.forEach(walk);
+      // Traverse shadow roots if present (e.g. customized quiz components / Web Components)
+      if (n.shadowRoot) {
+        Array.from(n.shadowRoot.childNodes).forEach(walk);
+      }
+
+      Array.from(n.childNodes).forEach(walk);
+
+      if (cs) {
+        const after = cs.getPropertyValue("content");
+        if (after && after !== "none" && after !== "normal") {
+          const aText = cleanStr(after.replace(/^['"]|['"]$/g, "")).trim();
+          if (aText) out += " " + aText;
+        }
+      }
+
       if (block) nl();
     }
 
     walk(root);
     return out.replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, MAX_CHARS);
   }
+
+  // ── Unblock Anti-Accessibility Restrictions on Page ─────────────────────
+  // Strips CSS and JS blocks that prevent text selection, inspection, or copying
+  function unlockPageAccessibility() {
+    try {
+      const unblockStyle = document.getElementById("cx-unblock-style");
+      if (!unblockStyle) {
+        const style = document.createElement("style");
+        style.id = "cx-unblock-style";
+        style.textContent = `
+          *, *::before, *::after {
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+            user-select: text !important;
+            pointer-events: auto !important;
+          }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+      }
+
+      // Bypass JavaScript event cancellers on copy, selectstart, contextmenu
+      ["copy", "cut", "selectstart", "contextmenu"].forEach(evt => {
+        window.addEventListener(evt, e => e.stopImmediatePropagation(), true);
+        document.addEventListener(evt, e => e.stopImmediatePropagation(), true);
+      });
+    } catch {}
+  }
+
+  // Run unblocker so users can always select & screen-read without hindrance
+  unlockPageAccessibility();
 
   function extractContext(container) {
     return container ? serialize(container) : "";
