@@ -28,14 +28,17 @@
 
         const container = findContainer(sel.anchorNode);
         const context = extractContext(container);
-        const enriched = context && context.length > raw.length ? context : raw;
+        let promptContent = raw;
+        if (context && context.length > raw.length && context.includes(raw)) {
+          promptContent = `FOCUSED SELECTION: "${raw}"\n\nLOCAL QUESTION CONTEXT & OPTIONS:\n${context}`;
+        }
 
         lastText = raw;
         try {
           chrome.runtime.sendMessage({
             type: "FRAME_SELECTION",
             text: raw,
-            enriched: enriched,
+            enriched: promptContent,
             preview: raw
           });
         } catch {}
@@ -71,18 +74,20 @@
   overlay.innerHTML = `
     <div id="cx-header">
       <span id="cx-title">canvax</span>
-      <button id="cx-cfg" title="settings">⚙</button>
-      <button id="cx-close">×</button>
+      <div class="cx-header-actions">
+        <button id="cx-cfg" title="Settings">⚙</button>
+        <button id="cx-close" title="Close">×</button>
+      </div>
     </div>
 
     <!-- Setup / first-run key entry -->
     <div id="cx-setup">
-      <div id="cx-setup-t">connect</div>
-      <div id="cx-setup-d">Paste your <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a> API key.</div>
-      <input id="cx-ki" type="password" placeholder="> key_" autocomplete="off" spellcheck="false" />
+      <div id="cx-setup-t">Connect Gemini API</div>
+      <div id="cx-setup-d">Paste your key from <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>.</div>
+      <input id="cx-ki" type="password" placeholder="AIzaSy..." autocomplete="off" spellcheck="false" />
       <div id="cx-setup-btns">
-        <button id="cx-kb" style="display:none">back</button>
-        <button id="cx-ks">connect</button>
+        <button id="cx-kb" style="display:none">Back</button>
+        <button id="cx-ks">Connect</button>
       </div>
       <div id="cx-err"></div>
     </div>
@@ -90,36 +95,42 @@
     <!-- Settings panel -->
     <div id="cx-settings" style="display:none">
       <div class="cx-set-row">
-        <span class="cx-set-label">mode</span>
+        <span class="cx-set-label">Mode</span>
         <div id="cx-modes">
-          <button class="cx-mode active" data-mode="highlight">highlight</button>
-          <button class="cx-mode" data-mode="screen">screen</button>
+          <button class="cx-mode active" data-mode="highlight">Highlight</button>
+          <button class="cx-mode" data-mode="screen">Screen</button>
         </div>
       </div>
       <div class="cx-set-row">
-        <span class="cx-set-label">theme</span>
+        <span class="cx-set-label">Theme</span>
         <div id="cx-themes">
-          <button class="cx-mode active" data-theme="auto">auto</button>
-          <button class="cx-mode" data-theme="light">light</button>
-          <button class="cx-mode" data-theme="dark">dark</button>
+          <button class="cx-mode active" data-theme="auto">Auto</button>
+          <button class="cx-mode" data-theme="light">Light</button>
+          <button class="cx-mode" data-theme="dark">Dark</button>
         </div>
       </div>
       <div class="cx-set-row">
-        <span class="cx-set-label">api key</span>
-        <button id="cx-rekey">change key</button>
+        <span class="cx-set-label">API Key</span>
+        <button id="cx-rekey">Change Key</button>
       </div>
       <div class="cx-set-row" style="justify-content:flex-end">
-        <button id="cx-set-done">done</button>
+        <button id="cx-set-done">Done</button>
       </div>
     </div>
 
     <!-- Main body -->
     <div id="cx-body" style="display:none">
-      <div id="cx-status">highlight text to query</div>
+      <div id="cx-status">Highlight text to query</div>
       <div id="cx-sel" style="display:none" title="Click to expand"><span id="cx-sel-badge">Q</span><span id="cx-sel-txt"></span></div>
       <div id="cx-think" style="display:none"><div class="cx-d"></div><div class="cx-d"></div><div class="cx-d"></div></div>
       <div id="cx-ans-wrap" style="display:none"><div id="cx-ans"></div></div>
-      <div id="cx-foot"><button id="cx-tag"></button><button id="cx-copy">copy</button><button id="cx-clr">clear</button></div>
+      <div id="cx-foot">
+        <button id="cx-tag"></button>
+        <div class="cx-foot-actions">
+          <button id="cx-copy">Copy</button>
+          <button id="cx-clr">Clear</button>
+        </div>
+      </div>
     </div>
     <div id="cx-rz"></div>`;
   root.appendChild(overlay);
@@ -344,11 +355,12 @@
   copyBtn.addEventListener("click", () => flashCopy(copyBtn, answerPlain));
 
   // ── Context extraction ──────────────────────────────────────────────────
-  // Walk up from the selection to find the true question container,
-  // then extract all text + form element data (options, inputs, etc.)
+  // Walk up from the selection to find ONLY the enclosing question container.
+  // CRITICAL: Never fall back to document.body or ancestors with multiple questions,
+  // which previously leaked the whole page and caused the AI to hallucinate.
   function findContainer(node) {
     let el = node?.nodeType === 1 ? node : node?.parentElement;
-    if (!el || el === document.body) return document.body;
+    if (!el || el === document.body || el === document.documentElement) return null;
 
     // Direct quiz/question containers in Canvas LMS, Moodle, Blackboard, Google Forms, etc.
     const QUESTION_SELECTORS = [
@@ -362,8 +374,8 @@
       ".quiz-item",
       ".quiz-question",
       "fieldset",
-      "section[role='region']",
-      "div[role='region']"
+      "[role='radiogroup']",
+      ".freebirdFormviewerComponentsQuestionBaseRoot"
     ];
 
     // 1) Check ancestors for a standard question wrapper
@@ -371,19 +383,18 @@
       const q = el.closest(sel);
       if (q && q !== document.body && q !== document.documentElement) {
         const cls = q.className?.toString() || "";
-        // Exclude inner partial wrappers like question_text, question_prompt, question_header
+        // Exclude inner partial wrappers
         if (!/\b(question_text|question_prompt|question_name|question_header|prompt_text)\b/i.test(cls)) {
           return q;
         }
       }
     }
 
-    // 2) Dynamic upward climb: keep climbing to encompass the entire question and its answer controls,
-    // stopping before engulfing multiple questions or the whole page.
+    // 2) Upward climb: stop strictly if multiple questions or huge containers are encountered
     let curr = el;
-    let best = el;
+    let best = null;
 
-    for (let i = 0; i < 15 && curr && curr !== document.body; i++) {
+    for (let i = 0; i < 8 && curr && curr !== document.body && curr !== document.documentElement; i++) {
       const hasControls = curr.querySelectorAll("select, input[type='radio'], input[type='checkbox'], input[type='text'], textarea").length > 0;
       if (hasControls) {
         best = curr;
@@ -395,13 +406,12 @@
       }
 
       const parent = curr.parentElement;
-      if (!parent || parent === document.body) break;
+      if (!parent || parent === document.body || parent === document.documentElement) break;
 
-      // Stop if parent holds multiple distinct questions
-      const qCount = parent.querySelectorAll(".display_question, .question_holder, [data-question-id], [id^='question_']").length;
+      // Stop immediately if parent holds multiple distinct questions or questions indicators
+      const qCount = parent.querySelectorAll(".display_question, .question_holder, [data-question-id], [id^='question_'], fieldset").length;
       if (qCount > 1) break;
 
-      // Stop if parent text has multiple "Question 1", "Question 2" headers
       const pText = parent.innerText || "";
       const qHeaders = pText.match(/\bQuestion\s+\d+\b/gi);
       if (qHeaders && qHeaders.length > 1) break;
@@ -410,7 +420,7 @@
       if (hasControls) best = curr;
     }
 
-    return best || el;
+    return best;
   }
 
   // Placeholder <option>s that are not real answers
@@ -519,13 +529,18 @@
       if (!t || t.length < MIN_CHARS || t === lastText) return;
       if (host.contains(s?.anchorNode)) return;
 
-      // Extract enriched context from the question container
+      // Extract enriched context from the question container if present
       const container = findContainer(s.anchorNode);
       const context = extractContext(container);
-      const enriched = context && context.length > t.length ? context : t;
+      
+      // If we found a valid focused container with controls/options, provide both selection & context
+      let promptContent = t;
+      if (context && context.length > t.length && context.includes(t)) {
+        promptContent = `FOCUSED SELECTION: "${t}"\n\nLOCAL QUESTION CONTEXT & OPTIONS:\n${context}`;
+      }
 
       lastText = t;
-      ask(enriched);
+      ask(promptContent);
     }, IDLE_MS);
   });
 
