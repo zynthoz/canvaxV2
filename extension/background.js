@@ -173,7 +173,8 @@ Form controls are serialized: dropdowns as [Dropdown #n for item "…" — choos
 CRITICAL ANTI-HALLUCINATION RULES:
 - Focus STRICTLY and ONLY on the user's targeted question or highlight.
 - If surrounding context contains other questions, navigation bars, headers, or unrelated quiz items, IGNORE THEM COMPLETELY. Do NOT attempt to answer questions that were not asked.
-- Whenever answer options are listed, the answer MUST be the option text copied VERBATIM, character for character. Never paraphrase, shorten, or reword it.
+- Whenever answer options (dropdowns, choices, matching items) are provided, the answer MUST ONLY be the option text copied VERBATIM from the list. Do NOT give background knowledge, definitions, or textbook explanations.
+- For matching questions with dropdowns, output ONLY: <item> → <option text>.
 - Be as SHORT as possible. Output ONLY the direct answer.
 - Zero filler, zero explanations, zero preamble, no restating the question.
 - If you are not confident in an answer, append " [?]" to that line.`;

@@ -58,7 +58,7 @@
         const container = findContainer(sel.anchorNode);
         const context = extractContext(container);
         let promptContent = raw;
-        if (context && context.length > raw.length && context.includes(raw)) {
+        if (context && context.length > raw.length) {
           promptContent = `FOCUSED SELECTION: "${raw}"\n\nLOCAL QUESTION CONTEXT & OPTIONS:\n${context}`;
         }
 
@@ -409,6 +409,7 @@
       ".question_holder",
       ".quiz_sortable",
       ".take_quiz_question",
+      ".question",
       "[data-question-id]",
       "[data-testid*='question']",
       "[id^='question_']",
@@ -419,15 +420,18 @@
       ".freebirdFormviewerComponentsQuestionBaseRoot"
     ];
 
-    // 1) Check ancestors for a standard question wrapper
+    // 1) Check ancestors for standard question wrappers (prefer enclosing wrapper with question controls)
     for (const sel of QUESTION_SELECTORS) {
       const q = el.closest(sel);
       if (q && q !== document.body && q !== document.documentElement) {
-        const cls = q.className?.toString() || "";
-        // Exclude inner partial wrappers
-        if (!/\b(question_text|question_prompt|question_name|question_header|prompt_text)\b/i.test(cls)) {
-          return q;
+        // If q is just an inner text/prompt span or div, check if its parent has the outer question container with controls
+        const hasControls = q.querySelectorAll("select, input, textarea").length > 0;
+        if (hasControls) return q;
+        const outer = q.parentElement?.closest(sel);
+        if (outer && outer !== document.body && outer !== document.documentElement) {
+          return outer;
         }
+        return q;
       }
     }
 
@@ -630,7 +634,7 @@
       
       // If we found a valid focused container with controls/options, provide both selection & context
       let promptContent = t;
-      if (context && context.length > t.length && context.includes(t)) {
+      if (context && context.length > t.length) {
         promptContent = `FOCUSED SELECTION: "${t}"\n\nLOCAL QUESTION CONTEXT & OPTIONS:\n${context}`;
       }
 
@@ -690,14 +694,14 @@
   const VERBATIM = "Copy each option VERBATIM, character for character, from the options list — never paraphrase, shorten or reword it.";
   const COMMON = "Be as concise as possible. No preamble, no explanation, no prefixes. Output ONLY the direct answer. Never repeat or echo the question or input labels. If you are not confident in an answer, append \" [?]\" to that line.";
   const TASKS = {
-    matching: `This is a MATCHING question. The dropdowns are numbered (#1, #2, ...) and each has its own numbered options. For EACH dropdown output exactly one line, in order, formatted exactly as: <dropdown #> → <option #>. <option text>   (example: "2 → 4. Water"). The option # MUST be the number from that dropdown's list, and the option text must be copied VERBATIM. Each option is normally used only once.`,
-    dropdown: `This is a dropdown question. Output exactly one line formatted as: <dropdown #> → <option #>. <option text>   (example: "1 → 3. Water"). The option # MUST be the number from the list, and the option text must be copied VERBATIM.`,
-    choice:   `This is a single-answer multiple-choice question (options marked ( )). Output ONLY the text of the one correct option — no letter, no number. ${VERBATIM}`,
+    matching: `This is a MATCHING question. For EACH item/dropdown, output ONLY one line formatted as: <item> → <option text> (example: "RA 1425 → Rizal Law mandating study of Rizal in schools"). Copy the option text VERBATIM from the dropdown list. Do NOT define or explain the item. Output ONLY the matching pairs.`,
+    dropdown: `This is a dropdown question. Output ONLY: <option text> (or <item> → <option text> if labeled). Copy the option text VERBATIM from the dropdown list. Do NOT explain or define.`,
+    choice:   `This is a multiple-choice question. Output ONLY the exact text of the correct option — no letter, no numbering, no explanation, no definition. ${VERBATIM}`,
     multi:    `This is a select-all-that-apply question (options marked [ ]). Output every correct option, one per line. ${VERBATIM}`,
     truefalse:`This is a true/false question. Output ONLY "True" or "False".`,
     fill:     `This is an IDENTIFICATION / short-answer / fill-in-the-blank question. Output ONLY the exact answer (the specific term, name, number, formula, or short phrase) that should be typed into the answer box. Do NOT include any label or prefix like "Answer:", "Input:", "Result:", or brackets. Do NOT repeat the question. If there are several distinct blanks, output each answer on its own line numbered "1. ", "2. ", ...`,
-    general:  `Answer directly. For a term or concept, explain it in 1-2 sentences. If there are several questions, answer each on its own line.`,
-    page:     `This is a whole page. Find every question on it and answer each on its own line, prefixed by its number. For each dropdown output one line formatted exactly as: <dropdown #> → <option #>. <option text>   (the option # from that dropdown's list, text copied VERBATIM). For multiple choice output the option text. ${VERBATIM}`
+    general:  `If the question provides options or dropdown choices, output ONLY the correct option text. Otherwise, answer directly in 1-2 concise sentences without fluff.`,
+    page:     `This is a whole page. Find every question on it and answer each on its own line, prefixed by its number. For dropdowns and matching, output ONLY the matching option text copied VERBATIM. For multiple choice output ONLY the option text. ${VERBATIM}`
   };
 
   function detectType(text) {
