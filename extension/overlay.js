@@ -1,4 +1,87 @@
 (() => {
+  // ── Anti-Proctoring & Focus Spoofing Cloak ───────────────────────────────
+  // Injected directly into the page's MAIN execution context so that page-level scripts
+  // (like Proctorio, Canvas quiz logs, Moodle proctors, Honorlock, Blackboard monitors)
+  // NEVER observe blur, focusout, visibilitychange, or hidden state.
+  function injectStealthCloak() {
+    try {
+      const script = document.createElement("script");
+      script.textContent = `(${function() {
+        // 1. Freeze Page Visibility API to always visible
+        try {
+          Object.defineProperty(Document.prototype, "visibilityState", {
+            get: () => "visible",
+            configurable: true
+          });
+          Object.defineProperty(Document.prototype, "hidden", {
+            get: () => false,
+            configurable: true
+          });
+          Object.defineProperty(document, "visibilityState", {
+            get: () => "visible",
+            configurable: true
+          });
+          Object.defineProperty(document, "hidden", {
+            get: () => false,
+            configurable: true
+          });
+        } catch {}
+
+        // 2. Freeze hasFocus to always return true
+        try {
+          Document.prototype.hasFocus = () => true;
+          document.hasFocus = () => true;
+        } catch {}
+
+        // 3. Neutralize tab-switch and blur events in the capturing phase
+        const interceptedEvents = [
+          "visibilitychange",
+          "webkitvisibilitychange",
+          "blur",
+          "focusout",
+          "pagehide"
+        ];
+
+        interceptedEvents.forEach(type => {
+          window.addEventListener(type, e => {
+            e.stopImmediatePropagation();
+            e.stopPropagation();
+          }, true);
+          document.addEventListener(type, e => {
+            e.stopImmediatePropagation();
+            e.stopPropagation();
+          }, true);
+        });
+
+        // 4. Overwrite inline event traps on window & document
+        try {
+          window.onblur = null;
+          window.onfocusout = null;
+          window.onpagehide = null;
+          document.onvisibilitychange = null;
+          document.onblur = null;
+          document.onfocusout = null;
+
+          Object.defineProperty(window, "onblur", { set: () => {}, get: () => null });
+          Object.defineProperty(window, "onfocusout", { set: () => {}, get: () => null });
+          Object.defineProperty(document, "onvisibilitychange", { set: () => {}, get: () => null });
+        } catch {}
+
+        // 5. Spoof mouseout / mouseleave from document edges
+        document.addEventListener("mouseleave", e => {
+          if (!e.relatedTarget && e.clientY <= 0) {
+            e.stopImmediatePropagation();
+          }
+        }, true);
+      }.toString()})();`;
+
+      (document.head || document.documentElement).appendChild(script);
+      script.remove();
+    } catch {}
+  }
+
+  injectStealthCloak();
+
   // ── Universal Text Highlighting & Selection Unlocker ──────────────────────
   // Executes immediately across all frames (top-level and iframes) to break through:
   // 1. CSS user-select: none / -webkit-user-select: none
@@ -222,7 +305,19 @@
     </div>
     <div id="cx-rz"></div>`;
   root.appendChild(overlay);
-  document.documentElement.appendChild(host);
+
+  function attachHost() {
+    if (host.isConnected) return;
+    const target = document.documentElement || document.body;
+    if (target) {
+      target.appendChild(host);
+    } else {
+      document.addEventListener("DOMContentLoaded", () => {
+        (document.documentElement || document.body)?.appendChild(host);
+      }, { once: true });
+    }
+  }
+  attachHost();
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const bodyEl    = $("cx-body");
