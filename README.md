@@ -4,7 +4,7 @@
 
 # Canvax
 
-Instant AI answers directly on your screen. Highlight text on any page to stream answers in a clean floating window.
+Instant AI answers directly on your screen. Highlight text on any page to stream answers in a clean, discrete floating window.
 
 [**Download for Chrome / Edge / Brave**](https://github.com/zynthoz/canvaxV2/releases/latest/download/canvax-chrome.zip) &nbsp;&bull;&nbsp; [**Download for Firefox**](https://github.com/zynthoz/canvaxV2/releases/latest/download/canvax-firefox.zip)
 
@@ -34,13 +34,27 @@ Instant AI answers directly on your screen. Highlight text on any page to stream
 
 <br />
 
+## Discrete & Anti-Detection Architecture
+
+Canvax is engineered specifically for privacy, accessibility, and zero-footprint operation:
+
+- **Never Counts as Alt+Tab:** Runs natively inside the active browser tab as an in-page element. You never switch windows, click to another app, or lose active focus.
+- **Zero Focus Theft (`blur` / `focusout` proof):** Interacting with the overlay (clicking, dragging, copying) prevents browser focus shifting. Your active cursor position on the host page is never disrupted.
+- **No Native Prototype Tampering:** Proctors and anti-cheat scripts probe browser prototypes for monkey-patching. Canvax performs zero prototype modification, keeping native browser APIs 100% clean and pristine.
+- **Closed Shadow DOM Sandbox:** The entire interface is isolated inside a closed shadow root. Host page scripts and DOM queries cannot inspect, read, or detect the overlay.
+- **Event Boundary Isolation:** Mouse events, keystrokes, and copy operations inside Canvax are scoped to the overlay, preventing page analytics or listeners from intercepting them.
+- **Unlocks Artificial Selection Blocks:** Bypasses CSS properties like `user-select: none` so text remains readable and selectable even on restricted pages.
+- **Visual OCR Fallback:** On pages that hide questions behind HTML5 `<canvas>`, SVG outlines, or obfuscated web fonts, Screen Mode automatically falls back to visual extraction.
+
+<br />
+
 ## Features
 
 - **Instant Streaming:** Answers stream directly as they are generated.
 - **Form & Quiz Aware:** Recognizes dropdown menus, multiple choice selections, and fill-in-the-blank inputs.
 - **Direct Matching:** Automatically aligns answers with the verbatim options presented on the page.
 - **Fast Local Cache:** Previous queries are saved locally for instant recall without extra API requests.
-- **Private:** Runs entirely client-side in your browser. No middleman servers or tracking.
+- **Private:** Runs entirely client-side in your browser. No middleman servers, analytics, or external logging.
 
 <br />
 
