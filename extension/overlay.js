@@ -1,174 +1,32 @@
 (() => {
-  // ── Anti-Proctoring & Focus Spoofing Cloak ───────────────────────────────
-  // Injected directly into the page's MAIN execution context so that page-level scripts
-  // (like Proctorio, Canvas quiz logs, Moodle proctors, Honorlock, Blackboard monitors)
-  // NEVER observe blur, focusout, visibilitychange, or hidden state.
-  function injectStealthCloak() {
+  // ── Completely Passive, Undetectable Accessibility & Selection Handler ─────
+  // Zero main-world script injection. No prototype monkey-patching.
+  // Proctors (Honorlock, Proctorio, Canvas) probe prototype tampering via .toString() or integrity checks.
+  // Instead, we operate purely within the isolated extension sandbox:
+  // 1. Injected extension stylesheet scoped only to re-enabling user-select without touching JS events
+  // 2. Passive selection listener (does not block, alter, or cancel ANY page events)
+  function ensureSelectionAllowed() {
     try {
-      const script = document.createElement("script");
-      script.textContent = `(${function() {
-        // 1. Freeze Page Visibility API to always visible
-        try {
-          Object.defineProperty(Document.prototype, "visibilityState", {
-            get: () => "visible",
-            configurable: true
-          });
-          Object.defineProperty(Document.prototype, "hidden", {
-            get: () => false,
-            configurable: true
-          });
-          Object.defineProperty(document, "visibilityState", {
-            get: () => "visible",
-            configurable: true
-          });
-          Object.defineProperty(document, "hidden", {
-            get: () => false,
-            configurable: true
-          });
-        } catch {}
-
-        // 2. Freeze hasFocus to always return true
-        try {
-          Document.prototype.hasFocus = () => true;
-          document.hasFocus = () => true;
-        } catch {}
-
-        // 3. Neutralize tab-switch and blur events in the capturing phase
-        const interceptedEvents = [
-          "visibilitychange",
-          "webkitvisibilitychange",
-          "blur",
-          "focusout",
-          "pagehide"
-        ];
-
-        interceptedEvents.forEach(type => {
-          window.addEventListener(type, e => {
-            e.stopImmediatePropagation();
-            e.stopPropagation();
-          }, true);
-          document.addEventListener(type, e => {
-            e.stopImmediatePropagation();
-            e.stopPropagation();
-          }, true);
-        });
-
-        // 4. Overwrite inline event traps on window & document
-        try {
-          window.onblur = null;
-          window.onfocusout = null;
-          window.onpagehide = null;
-          document.onvisibilitychange = null;
-          document.onblur = null;
-          document.onfocusout = null;
-
-          Object.defineProperty(window, "onblur", { set: () => {}, get: () => null });
-          Object.defineProperty(window, "onfocusout", { set: () => {}, get: () => null });
-          Object.defineProperty(document, "onvisibilitychange", { set: () => {}, get: () => null });
-        } catch {}
-
-        // 5. Spoof mouseout / mouseleave from document edges
-        document.addEventListener("mouseleave", e => {
-          if (!e.relatedTarget && e.clientY <= 0) {
-            e.stopImmediatePropagation();
-          }
-        }, true);
-      }.toString()})();`;
-
-      (document.head || document.documentElement).appendChild(script);
-      script.remove();
-    } catch {}
-  }
-
-  injectStealthCloak();
-
-  // ── Universal Text Highlighting & Selection Unlocker ──────────────────────
-  // Executes immediately across all frames (top-level and iframes) to break through:
-  // 1. CSS user-select: none / -webkit-user-select: none
-  // 2. JavaScript event killers: selectstart, mousedown, mouseup, copy, cut, contextmenu
-  // 3. Inline attributes: onselectstart="return false", oncopy="return false"
-  // 4. Transparent overlay div shields sitting over text (disables pointer-events on empty overlay layers)
-  function unlockPageHighlighting() {
-    try {
-      const styleId = "cx-highlight-unlocker";
+      const styleId = "cx-user-select-restore";
       if (!document.getElementById(styleId)) {
         const style = document.createElement("style");
         style.id = styleId;
+        // Non-destructive style: only re-enables user-select where developers explicitly disabled it
         style.textContent = `
-          *, *::before, *::after {
-            -webkit-user-select: text !important;
-            -moz-user-select: text !important;
-            -ms-user-select: text !important;
-            user-select: text !important;
-            -webkit-touch-callout: default !important;
-          }
-          /* Neutralize invisible shields/canvas overlays that block text selection */
-          div[style*="opacity: 0"], div[style*="opacity:0"],
-          .prevent-select, .no-select, .unselectable, .protected-content {
+          body, p, span, div, h1, h2, h3, h4, h5, h6, li, td, th, label, blockquote, q, article, section {
             -webkit-user-select: text !important;
             user-select: text !important;
           }
         `;
         (document.head || document.documentElement).appendChild(style);
       }
-
-      // Neutralize JS-level event cancellation in the capturing phase
-      const unblockEvents = ["selectstart", "mousedown", "mouseup", "copy", "cut", "contextmenu", "dragstart"];
-      unblockEvents.forEach(evt => {
-        window.addEventListener(evt, e => {
-          // If the page's event listener tries to prevent selection/copying, stop it
-          if (e.target && !e.target.closest?.("#cx-host")) {
-            e.stopPropagation ? e.stopPropagation() : null;
-          }
-        }, true);
-      });
-
-      // Clear inline HTML attribute blocks (e.g. <body onselectstart="return false">)
-      function clearInlineBlocks() {
-        if (!document.body) return;
-        const inlineAttrs = ["onselectstart", "oncopy", "oncut", "oncontextmenu", "ondragstart", "onmousedown"];
-        [document.body, document.documentElement].forEach(target => {
-          if (!target) return;
-          inlineAttrs.forEach(attr => {
-            if (target.hasAttribute(attr)) target.removeAttribute(attr);
-            if (target[attr]) target[attr] = null;
-          });
-        });
-      }
-
-      clearInlineBlocks();
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", clearInlineBlocks, { once: true });
-      }
-
-      // Detect and neutralize transparent blocker elements floating over content
-      function neutraliseOverlays() {
-        const potentialShields = document.querySelectorAll("div, span");
-        potentialShields.forEach(el => {
-          if (el.id === "cx-host" || el.closest("#cx-host")) return;
-          const cs = window.getComputedStyle ? getComputedStyle(el) : null;
-          if (cs && (cs.position === "absolute" || cs.position === "fixed")) {
-            const z = parseInt(cs.zIndex, 10);
-            const isTransparent = cs.opacity === "0" || cs.backgroundColor === "rgba(0, 0, 0, 0)" || cs.backgroundColor === "transparent";
-            const hasNoDirectText = !el.innerText || !el.innerText.trim();
-            // If it's a floating transparent layer with high z-index and no text, disable its pointer events
-            if (z > 10 && isTransparent && hasNoDirectText && el.children.length === 0) {
-              el.style.pointerEvents = "none";
-            }
-          }
-        });
-      }
-
-      if (document.readyState === "complete" || document.readyState === "interactive") {
-        neutraliseOverlays();
-      } else {
-        window.addEventListener("load", neutraliseOverlays, { once: true });
-      }
     } catch {}
   }
 
-  // Run immediately on script evaluation
-  unlockPageHighlighting();
+  ensureSelectionAllowed();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", ensureSelectionAllowed, { once: true });
+  }
 
   const isTopFrame = window.self === window.top;
   const IDLE_MS = 1500, MIN_CHARS = 3, MAX_CHARS = 8000;
