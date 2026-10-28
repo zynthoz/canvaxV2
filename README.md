@@ -26,7 +26,9 @@ Instant AI answers directly on your screen. Highlight text on any page to stream
 
 ## How to Use
 
-- **Highlight Mode (Default):** Highlight any text or question on the page. The overlay reads the prompt and streams the solution immediately.
+- **Highlight Mode (Default):** Highlight any text or question on the page. Canvax automatically detects if real quiz options/controls exist—only attaching options when present, and directly answering open-ended or reading questions from global knowledge without surrounding page clutter.
+- **Manual Prompting & Direct Search:** Type any custom question, math problem, or follow-up in the prompt bar and press `Enter`. Canvax automatically distinguishes between follow-up queries (`[FOL]`) and standalone general knowledge lookups (`[ASK]`). Click the `Linked to current Q [✕]` chip at any time to instantly detach page context and search freely.
+- **Expound on Answers:** Click **Expound** next to Copy to receive an in-depth, step-by-step conceptual explanation and proof. Click **Brief** (or the footer tag) to seamlessly switch back to the concise verbatim answer without consuming extra quota.
 - **Screen Mode:** Open settings (`⚙`), select **Screen**, and click **Done** to scan and solve all visible questions on the page at once.
 - **Toggle Visibility:** Press `Alt + Q` or click the toolbar icon.
 - **Copy:** Click `Copy` next to any specific answer line or copy the whole result with one click.
@@ -39,9 +41,11 @@ Instant AI answers directly on your screen. Highlight text on any page to stream
 Canvax is engineered specifically for privacy, accessibility, and zero-footprint operation:
 
 - **Never Counts as Alt+Tab:** Runs natively inside the active browser tab as an in-page element. You never switch windows, click to another app, or lose active focus.
-- **Zero Focus Theft (`blur` / `focusout` proof):** Interacting with the overlay (clicking, dragging, copying) prevents browser focus shifting. Your active cursor position on the host page is never disrupted.
+- **Zero Focus Theft (`blur` / `focusout` proof):** Interacting with the overlay (clicking Expound, Clear, Copy, Settings, or dragging) prevents browser focus shifting. Your active cursor position on the host page is never disrupted.
+- **Keystroke & Input Scoping:** All typing and follow-up prompting in the manual prompt bar is isolated inside the closed shadow root with stopped propagation. Page keyloggers, shortcut listeners, and analytics cannot intercept your keystrokes.
 - **No Native Prototype Tampering:** Proctors and anti-cheat scripts probe browser prototypes for monkey-patching. Canvax performs zero prototype modification, keeping native browser APIs 100% clean and pristine.
 - **Closed Shadow DOM Sandbox:** The entire interface is isolated inside a closed shadow root. Host page scripts and DOM queries cannot inspect, read, or detect the overlay.
+- **Background Worker Network Isolation:** Gemini API requests are executed entirely within the extension service worker / background thread, leaving the host page's network inspection and Fetch/XHR log completely untouched.
 - **Event Boundary Isolation:** Mouse events, keystrokes, and copy operations inside Canvax are scoped to the overlay, preventing page analytics or listeners from intercepting them.
 - **Unlocks Artificial Selection Blocks:** Bypasses CSS properties like `user-select: none` so text remains readable and selectable even on restricted pages.
 - **Visual OCR Fallback:** On pages that hide questions behind HTML5 `<canvas>`, SVG outlines, or obfuscated web fonts, Screen Mode automatically falls back to visual extraction.
@@ -51,8 +55,11 @@ Canvax is engineered specifically for privacy, accessibility, and zero-footprint
 ## Features
 
 - **Instant Streaming:** Answers stream directly as they are generated.
+- **One-Click Expound:** Get instant step-by-step conceptual breakdowns and logic behind any answer.
+- **Manual Prompt & Follow-Up:** Type custom prompts or ask clarifying questions on ongoing quiz items.
 - **Form & Quiz Aware:** Recognizes dropdown menus, multiple choice selections, and fill-in-the-blank inputs.
 - **Direct Matching:** Automatically aligns answers with the verbatim options presented on the page.
+- **Dual-View Memory Cache:** Toggle between brief verbatim options and full explanations with zero extra API requests.
 - **Fast Local Cache:** Previous queries are saved locally for instant recall without extra API requests.
 - **Private:** Runs entirely client-side in your browser. No middleman servers, analytics, or external logging.
 

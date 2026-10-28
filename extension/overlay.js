@@ -1,23 +1,35 @@
 (() => {
   // ── Completely Passive, Undetectable Accessibility & Selection Handler ─────
   // Zero main-world script injection. No prototype monkey-patching.
-  // Proctors (Honorlock, Proctorio, Canvas) probe prototype tampering via .toString() or integrity checks.
-  // Instead, we operate purely within the isolated extension sandbox:
-  // 1. Injected extension stylesheet scoped only to re-enabling user-select without touching JS events
-  // 2. Passive selection listener (does not block, alter, or cancel ANY page events)
+  // Proctors probe DOM modifications and prototype tampering.
+  // We use adoptedStyleSheets when supported or un-fingerprinted style tags.
+  const RESTORE_CSS = `
+    body, p, span, div, h1, h2, h3, h4, h5, h6, li, td, th, label, blockquote, q, article, section {
+      -webkit-user-select: text !important;
+      user-select: text !important;
+    }
+  `;
+
   function ensureSelectionAllowed() {
     try {
-      const styleId = "cx-user-select-restore";
-      if (!document.getElementById(styleId)) {
+      if (document.adoptedStyleSheets) {
+        // Constructable stylesheet: does not add any <style> node to the DOM tree
+        const isAlreadyAdded = Array.from(document.adoptedStyleSheets).some(s => s._cxRestore);
+        if (!isAlreadyAdded) {
+          const sheet = new CSSStyleSheet();
+          sheet.replaceSync(RESTORE_CSS);
+          sheet._cxRestore = true;
+          document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+          return;
+        }
+      }
+    } catch {}
+
+    try {
+      if (!document.querySelector("style[data-user-select-restore]")) {
         const style = document.createElement("style");
-        style.id = styleId;
-        // Non-destructive style: only re-enables user-select where developers explicitly disabled it
-        style.textContent = `
-          body, p, span, div, h1, h2, h3, h4, h5, h6, li, td, th, label, blockquote, q, article, section {
-            -webkit-user-select: text !important;
-            user-select: text !important;
-          }
-        `;
+        style.setAttribute("data-user-select-restore", "true");
+        style.textContent = RESTORE_CSS;
         (document.head || document.documentElement).appendChild(style);
       }
     } catch {}
@@ -58,7 +70,7 @@
         const container = findContainer(sel.anchorNode);
         const context = extractContext(container);
         let promptContent = raw;
-        if (context && context.length > raw.length) {
+        if (hasRealOptionsOrControls(container, context) && context.length > raw.length) {
           promptContent = `FOCUSED SELECTION: "${raw}"\n\nLOCAL QUESTION CONTEXT & OPTIONS:\n${context}`;
         }
 
@@ -84,6 +96,10 @@
   let resizing = false, resStartX, resStartY, resStartW, resStartH;
   let port = null, reqId = 0;        // active streaming port / request counter (stale-reply guard)
   let lastAskText = "", answerPlain = "";
+  let savedBriefAnswer = null;       // { text, meta, preview, badge, plain }
+  let savedExpoundAnswer = null;     // { text, preview, plain }
+  let currentView = "brief";         // "brief" | "expound" | "manual"
+  let contextDetached = false;       // true if user detached page context for direct search
 
   // ── DOM ─────────────────────────────────────────────────────────────────
   // Shadow DOM host: isolates the overlay from the page's CSS (and the page from ours).
@@ -149,13 +165,24 @@
 
     <!-- Main body -->
     <div id="cx-body" style="display:none">
-      <div id="cx-status">Highlight text to query</div>
+      <div id="cx-status">Highlight text or ask below</div>
       <div id="cx-sel" style="display:none" title="Click to expand"><span id="cx-sel-badge">Q</span><span id="cx-sel-txt"></span></div>
       <div id="cx-think" style="display:none"><div class="cx-d"></div><div class="cx-d"></div><div class="cx-d"></div></div>
       <div id="cx-ans-wrap" style="display:none"><div id="cx-ans"></div></div>
+      <div id="cx-ctx-chip" style="display:none">
+        <span id="cx-ctx-txt">Linked to current Q</span>
+        <button id="cx-ctx-del" title="Detach context — ask or search directly">×</button>
+      </div>
+      <div id="cx-prompt-wrap">
+        <input id="cx-prompt-in" type="text" placeholder="Ask or follow up... (Enter)" autocomplete="off" spellcheck="false" />
+        <button id="cx-prompt-send" title="Send (Enter)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
+      </div>
       <div id="cx-foot">
         <button id="cx-tag"></button>
         <div class="cx-foot-actions">
+          <button id="cx-expound" title="Expound on this answer" style="display:none">Expound</button>
           <button id="cx-copy">Copy</button>
           <button id="cx-clr">Clear</button>
         </div>
@@ -201,6 +228,13 @@
   const rzHandle  = $("cx-rz");
   const tagEl     = $("cx-tag");
   const copyBtn   = $("cx-copy");
+  const promptWrap= $("cx-prompt-wrap");
+  const promptIn  = $("cx-prompt-in");
+  const promptSend= $("cx-prompt-send");
+  const expoundBtn= $("cx-expound");
+  const ctxChip   = $("cx-ctx-chip");
+  const ctxTxt    = $("cx-ctx-txt");
+  const ctxDel    = $("cx-ctx-del");
 
   // ── Panels ──────────────────────────────────────────────────────────────
   function hideAll3() {
@@ -333,16 +367,37 @@
   function setTag(text = "", kind = "") {
     tagEl.textContent = text;
     tagEl.className = kind ? "cx-" + kind : "";
-    tagEl.title = kind === "act" ? "ask again, skipping the cache" : "";
+    tagEl.title = kind === "act" ? "Click to toggle or refresh" : "";
   }
   tagEl.addEventListener("click", () => {
-    if (tagEl.classList.contains("cx-act") && lastAskText) ask(lastAskText, true);
+    if (tagEl.classList.contains("cx-act")) {
+      if (tagEl.textContent.includes("brief answer") && savedBriefAnswer) {
+        expoundBtn.click();
+      } else if (tagEl.textContent.includes("explanation") && savedExpoundAnswer) {
+        expoundBtn.click();
+      } else if (lastAskText) {
+        ask(lastAskText, true, null, currentView === "expound" ? "expound" : (currentView === "manual" ? "manual" : "quiz"));
+      }
+    }
   });
 
   clrBtn.addEventListener("click", () => {
     cancelRequest();
-    lastText = ""; setPreview(""); answerPlain = ""; setTag();
-    setStatus(currentMode === "highlight" ? "highlight text to query" : "reading page...");
+    lastText = ""; lastAskText = ""; answerPlain = "";
+    savedBriefAnswer = null; savedExpoundAnswer = null; currentView = "brief";
+    contextDetached = false;
+    if (ctxChip) ctxChip.style.display = "none";
+    if (promptIn) {
+      promptIn.value = "";
+      promptIn.placeholder = "Ask or follow up... (Enter)";
+    }
+    if (expoundBtn) {
+      expoundBtn.style.display = "none";
+      expoundBtn.textContent = "Expound";
+      expoundBtn.title = "Expound on this answer";
+    }
+    setPreview(""); setTag();
+    setStatus(currentMode === "highlight" ? "Highlight text or ask below" : "reading page...");
   });
 
   function setPreview(raw) {
@@ -608,6 +663,15 @@
     return out.replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, MAX_CHARS);
   }
 
+  function hasRealOptionsOrControls(container, context) {
+    if (!context) return false;
+    if (container?.querySelector?.("select, input, textarea")) return true;
+    if (/\[Dropdown #|\([x ]\)|\[[x ]\]|\[Blank input\]/i.test(context)) return true;
+    const optionMatches = context.match(/^\s*(?:[A-Ea-e][.)]|[1-9][.)]|\([A-Ea-e1-9]\))\s+\S+/gm);
+    if (optionMatches && optionMatches.length >= 2) return true;
+    return false;
+  }
+
   function extractContext(container) {
     return container ? serialize(container) : "";
   }
@@ -628,17 +692,18 @@
       if (!t || t.length < MIN_CHARS || t === lastText) return;
       if (host.contains(s?.anchorNode)) return;
 
-      // Extract enriched context from the question container if present
+      // Extract enriched context ONLY if container contains actual quiz controls/options
       const container = findContainer(s.anchorNode);
       const context = extractContext(container);
+      const hasOptions = hasRealOptionsOrControls(container, context);
       
-      // If we found a valid focused container with controls/options, provide both selection & context
       let promptContent = t;
-      if (context && context.length > t.length) {
+      if (hasOptions && context && context.length > t.length) {
         promptContent = `FOCUSED SELECTION: "${t}"\n\nLOCAL QUESTION CONTEXT & OPTIONS:\n${context}`;
       }
 
       lastText = t;
+      contextDetached = false;
       ask(promptContent);
     }, IDLE_MS);
   });
@@ -686,22 +751,21 @@
       setStatus("scanning page...");
       setTimeout(scanPage, 300);
     } else {
-      setStatus("highlight text to query");
+      setStatus("Highlight text or ask below");
     }
   };
 
   // ── Question types & prompts ────────────────────────────────────────────
-  const VERBATIM = "Copy each option VERBATIM, character for character, from the options list — never paraphrase, shorten or reword it.";
-  const COMMON = "Be as concise as possible. No preamble, no explanation, no prefixes. Output ONLY the direct answer. Never repeat or echo the question or input labels. If you are not confident in an answer, append \" [?]\" to that line.";
+  const VERBATIM = "Copy the option text VERBATIM from the page.";
   const TASKS = {
-    matching: `This is a MATCHING question. For EACH item/dropdown, output ONLY one line formatted as: <item> → <option text> (example: "RA 1425 → Rizal Law mandating study of Rizal in schools"). Copy the option text VERBATIM from the dropdown list. Do NOT define or explain the item. Output ONLY the matching pairs.`,
-    dropdown: `This is a dropdown question. Output ONLY: <option text> (or <item> → <option text> if labeled). Copy the option text VERBATIM from the dropdown list. Do NOT explain or define.`,
-    choice:   `This is a multiple-choice question. Output ONLY the exact text of the correct option — no letter, no numbering, no explanation, no definition. ${VERBATIM}`,
-    multi:    `This is a select-all-that-apply question (options marked [ ]). Output every correct option, one per line. ${VERBATIM}`,
-    truefalse:`This is a true/false question. Output ONLY "True" or "False".`,
-    fill:     `This is an IDENTIFICATION / short-answer / fill-in-the-blank question. Output ONLY the exact answer (the specific term, name, number, formula, or short phrase) that should be typed into the answer box. Do NOT include any label or prefix like "Answer:", "Input:", "Result:", or brackets. Do NOT repeat the question. If there are several distinct blanks, output each answer on its own line numbered "1. ", "2. ", ...`,
-    general:  `If the question provides options or dropdown choices, output ONLY the correct option text. Otherwise, answer directly in 1-2 concise sentences without fluff.`,
-    page:     `This is a whole page. Find every question on it and answer each on its own line, prefixed by its number. For dropdowns and matching, output ONLY the matching option text copied VERBATIM. For multiple choice output ONLY the option text. ${VERBATIM}`
+    matching: `MATCHING: Output each pair on its own line: <item> → <verbatim option text>. ${VERBATIM}`,
+    dropdown: `DROPDOWN: Output ONLY the matching option text. ${VERBATIM}`,
+    choice:   `MULTIPLE CHOICE: Output ONLY the exact text of the correct option — no letter, no numbering. ${VERBATIM}`,
+    multi:    `SELECT ALL: Output each correct option verbatim on its own line. ${VERBATIM}`,
+    truefalse:`TRUE/FALSE: Output ONLY "True" or "False".`,
+    fill:     `FILL-IN-THE-BLANK: Output ONLY the exact text/term to enter into the blank. No prefixes, no labels. If multiple blanks, number each on its own line.`,
+    general:  `DIRECT ANSWER: If choices exist, output the verbatim option. Otherwise, answer factually in minimal words.`,
+    page:     `SCAN: Answer each question on its own numbered line (1. <answer>). ${VERBATIM}`
   };
 
   function detectType(text) {
@@ -721,7 +785,7 @@
   }
 
   function buildPrompt(text) {
-    return `TASK: ${TASKS[detectType(text)]}\n${COMMON}\n\nCONTENT:\n${text}`;
+    return `TASK: ${TASKS[detectType(text)]}\n\nCONTENT:\n${text}`;
   }
 
   // ── Answer cache (persists across pages/sessions) ───────────────────────
@@ -821,9 +885,105 @@
     return bestScore >= 0.55 ? best : answer;
   }
 
-  // Renders streamed text. Rows are built from the page's own options (see above);
-  // a trailing "[?]" becomes a low-confidence badge. Returns true if any line was unsure.
-  function renderAnswer(raw, meta = { dropdowns: [], choices: [], all: [] }) {
+  // Renders streamed text. Routes between quiz option matching and rich text formatting.
+  function renderAnswer(raw, meta = { dropdowns: [], choices: [], all: [] }, mode = "quiz") {
+    if (mode === "expound" || mode === "manual") {
+      return renderRichText(raw);
+    }
+    return renderQuizAnswer(raw, meta);
+  }
+
+  // Pure DOM, zero-XSS, structured renderer for expounded and manual explanations.
+  function renderRichText(raw) {
+    const wrap = el("div", "cx-exp-wrap");
+    answerPlain = raw.trim();
+
+    function appendFormattedInline(parent, text) {
+      const parts = text.split(/(\*\*.*?\*\*|`.*?`)/g);
+      for (const part of parts) {
+        if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+          const strong = document.createElement("strong");
+          strong.textContent = part.slice(2, -2);
+          parent.appendChild(strong);
+        } else if (part.startsWith("`") && part.endsWith("`") && part.length >= 2) {
+          const code = document.createElement("code");
+          code.className = "cx-code";
+          code.textContent = part.slice(1, -1);
+          parent.appendChild(code);
+        } else if (part) {
+          parent.appendChild(document.createTextNode(part));
+        }
+      }
+    }
+
+    const lines = raw.split("\n");
+    let currentList = null;
+    let listType = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (!trimmed) {
+        currentList = null;
+        listType = null;
+        continue;
+      }
+
+      const headMatch = trimmed.match(/^#{1,4}\s+(.*)$/);
+      if (headMatch) {
+        currentList = null;
+        listType = null;
+        const h = el("div", "cx-exp-h");
+        appendFormattedInline(h, headMatch[1]);
+        wrap.appendChild(h);
+        continue;
+      }
+
+      const bulletMatch = trimmed.match(/^[-*•]\s+(.*)$/);
+      if (bulletMatch) {
+        if (!currentList || listType !== "ul") {
+          currentList = el("div", "cx-exp-list");
+          listType = "ul";
+          wrap.appendChild(currentList);
+        }
+        const li = el("div", "cx-exp-li");
+        const dot = el("span", "cx-exp-bullet", "•");
+        const content = el("div", "cx-exp-txt");
+        appendFormattedInline(content, bulletMatch[1]);
+        li.append(dot, content);
+        currentList.appendChild(li);
+        continue;
+      }
+
+      const numMatch = trimmed.match(/^(\d+)[.)]\s+(.*)$/);
+      if (numMatch) {
+        if (!currentList || listType !== "ol") {
+          currentList = el("div", "cx-exp-list");
+          listType = "ol";
+          wrap.appendChild(currentList);
+        }
+        const li = el("div", "cx-exp-li");
+        const num = el("span", "cx-exp-num", numMatch[1] + ".");
+        const content = el("div", "cx-exp-txt");
+        appendFormattedInline(content, numMatch[2]);
+        li.append(num, content);
+        currentList.appendChild(li);
+        continue;
+      }
+
+      currentList = null;
+      listType = null;
+      const p = el("div", "cx-exp-p");
+      appendFormattedInline(p, trimmed);
+      wrap.appendChild(p);
+    }
+
+    ansEl.replaceChildren(wrap);
+    return false;
+  }
+
+  function renderQuizAnswer(raw, meta = { dropdowns: [], choices: [], all: [] }) {
     const frag = document.createDocumentFragment();
     const plain = [];
     let anyUnsure = false, rowIdx = 0;
@@ -898,6 +1058,170 @@
     return anyUnsure;
   }
 
+  function handleAnswerFinished(text, meta, mode) {
+    if (mode === "quiz") {
+      savedBriefAnswer = { text, meta, preview: selTxt.textContent, badge: selBadge.textContent, plain: answerPlain };
+      savedExpoundAnswer = null;
+      currentView = "brief";
+      expoundBtn.style.display = "";
+      expoundBtn.textContent = "Expound";
+      expoundBtn.title = "Get detailed explanation and reasoning";
+    } else if (mode === "expound") {
+      savedExpoundAnswer = { text, preview: selTxt.textContent, plain: answerPlain };
+      currentView = "expound";
+      expoundBtn.style.display = "";
+      expoundBtn.textContent = "Brief";
+      expoundBtn.title = "Show concise answer";
+      if (savedBriefAnswer) setTag("← View brief answer", "act");
+    } else if (mode === "manual") {
+      savedBriefAnswer = { text, meta: { dropdowns: [], choices: [], all: [] }, preview: selTxt.textContent, badge: selBadge.textContent, plain: answerPlain };
+      savedExpoundAnswer = null;
+      currentView = "manual";
+      expoundBtn.style.display = "";
+      expoundBtn.textContent = "Expound";
+      expoundBtn.title = "Expound on this answer";
+    }
+
+    if (lastText && answerPlain && mode !== "manual") {
+      contextDetached = false;
+      if (ctxChip) {
+        ctxChip.style.display = "flex";
+        const shortQ = lastText.replace(/\s+/g, " ").trim();
+        ctxTxt.textContent = "Linked: " + (shortQ.length > 26 ? shortQ.slice(0, 26) + "…" : shortQ);
+        ctxChip.title = "Linked to current question. Click ✕ to ask/search independently.";
+        promptIn.placeholder = "Ask follow-up or any question... (Enter)";
+      }
+    }
+  }
+
+  // ── Expound on an answer ────────────────────────────────────────────────
+  function doExpound() {
+    const questionContext = lastText || (savedBriefAnswer?.preview || "Current question");
+    const currentAnswer = answerPlain || (savedBriefAnswer?.plain || "");
+    if (!questionContext && !currentAnswer) return;
+
+    const expoundPrompt = `TARGET QUESTION:\n${questionContext}\n\nANSWER:\n${currentAnswer}\n\nProvide the high-density conceptual breakdown and step-by-step logic.`;
+
+    selBadge.textContent = "EXP";
+    const previewStr = questionContext.length > 50 ? questionContext.slice(0, 50) + "…" : questionContext;
+    selTxt.textContent = "Expounding: " + previewStr;
+    selEl.title = questionContext;
+    selEl.style.display = "flex";
+
+    expoundBtn.textContent = "Brief";
+    expoundBtn.title = "Show concise answer";
+    currentView = "expound";
+
+    ask(expoundPrompt, false, null, "expound");
+  }
+
+  expoundBtn.addEventListener("click", () => {
+    if (currentView === "expound") {
+      // Toggle back to brief answer
+      if (savedBriefAnswer) {
+        showAnswerPane();
+        renderAnswer(savedBriefAnswer.text, savedBriefAnswer.meta, "quiz");
+        selBadge.textContent = savedBriefAnswer.badge || "Q";
+        selTxt.textContent = savedBriefAnswer.preview || "";
+        currentView = "brief";
+        expoundBtn.textContent = "Expound";
+        expoundBtn.title = "Get detailed explanation and reasoning";
+        if (savedExpoundAnswer) {
+          setTag("→ View explanation", "act");
+        }
+      }
+    } else {
+      // User wants to view or generate expounded explanation
+      if (savedExpoundAnswer) {
+        showAnswerPane();
+        renderAnswer(savedExpoundAnswer.text, { dropdowns: [], choices: [], all: [] }, "expound");
+        selBadge.textContent = "EXP";
+        selTxt.textContent = savedExpoundAnswer.preview || "Detailed Explanation";
+        currentView = "expound";
+        expoundBtn.textContent = "Brief";
+        expoundBtn.title = "Show concise answer";
+        setTag("← View brief answer", "act");
+      } else {
+        doExpound();
+      }
+    }
+  });
+
+  // ── Manual prompt / follow-up handler ───────────────────────────────────
+  ctxDel?.addEventListener("click", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    contextDetached = true;
+    ctxChip.style.display = "none";
+    promptIn.placeholder = "Ask anything / search directly... (Enter)";
+    promptIn.focus();
+  });
+
+  function isFollowUp(query, lastQ, lastA) {
+    if (!lastQ && !lastA) return false;
+    const q = query.toLowerCase().trim();
+
+    const followUpPatterns = [
+      /^(why|how so|why not|how come)\b/i,
+      /^(explain|elaborate|clarify|expand|break down)\b/i,
+      /^(what about|how about|is it|is that|could it be)\b/i,
+      /\b(the answer|this answer|the question|above|previous|the option|choice [a-d]|option [a-d]|instead of)\b/i,
+      /\b(step \d|step-by-step|formula used|show work)\b/i
+    ];
+    if (followUpPatterns.some(re => re.test(q))) return true;
+
+    const stopWords = new Set(["the", "is", "at", "which", "on", "a", "an", "and", "or", "to", "in", "for", "of", "what", "how", "who", "when", "where", "can", "you", "tell", "me"]);
+    const queryTokens = q.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
+    const contextText = ((lastQ || "") + " " + (lastA || "")).toLowerCase();
+
+    let matches = 0;
+    for (const t of queryTokens) {
+      if (contextText.includes(t)) matches++;
+    }
+    return matches >= 2 || (matches >= 1 && queryTokens.length <= 3);
+  }
+
+  function sendManualPrompt() {
+    const q = promptIn.value.trim();
+    if (!q) return;
+    promptIn.value = "";
+
+    const followUp = !contextDetached && (answerPlain || lastText) && isFollowUp(q, lastText, answerPlain);
+
+    let fullPrompt;
+    if (followUp) {
+      fullPrompt = `[CONTEXT FROM PAGE]\n${lastText}\n\n[ANSWER]\n${answerPlain}\n\n[FOLLOW-UP QUERY]\n${q}`;
+    } else {
+      fullPrompt = q;
+      contextDetached = true;
+      if (ctxChip) ctxChip.style.display = "none";
+      promptIn.placeholder = "Ask anything / search directly... (Enter)";
+    }
+
+    selBadge.textContent = followUp ? "FOL" : "ASK";
+    selTxt.textContent = q;
+    selEl.title = q;
+    selEl.style.display = "flex";
+
+    currentView = "manual";
+    lastText = q;
+
+    ask(fullPrompt, true, null, "manual");
+  }
+
+  promptSend.addEventListener("click", sendManualPrompt);
+  promptIn.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      sendManualPrompt();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      promptIn.blur();
+    }
+  });
+
   function showAnswerPane() {
     statusEl.style.display = "none";
     thinkEl.style.display = "none";
@@ -920,7 +1244,7 @@
   }
 
   // ── Ask Gemini ──────────────────────────────────────────────────────────
-  async function ask(text, fresh = false, image = null) {
+  async function ask(text, fresh = false, image = null, mode = "quiz") {
     if (!apiKey) { showSetup(); return; }
     cancelRequest();
     const id = reqId;
@@ -932,16 +1256,17 @@
     thinkEl.style.display = "flex";
     setTag();
 
-    const prompt = buildPrompt(text);
-    const ckey = hash(prompt + (image?.base64 ? "_img" : ""));
-    const meta = parseOptions(text);
+    const prompt = mode === "quiz" ? buildPrompt(text) : text;
+    const ckey = hash(mode + "_" + prompt + (image?.base64 ? "_img" : ""));
+    const meta = mode === "quiz" ? parseOptions(text) : { dropdowns: [], choices: [], all: [] };
 
     if (!fresh) {
       const hit = await cacheGet(ckey);
       if (id !== reqId) return; // superseded while reading the cache
       if (hit) {
         showAnswerPane();
-        renderAnswer(hit, meta);
+        renderAnswer(hit, meta, mode);
+        handleAnswerFinished(hit, meta, mode);
         setTag("cached ↻", "act");
         return;
       }
@@ -970,13 +1295,14 @@
         } else if (m.type === "chunk") {
           acc += m.text;
           showAnswerPane();
-          renderAnswer(acc, meta);
+          renderAnswer(acc, meta, mode);
         } else if (m.type === "done") {
           finished = true;
           showAnswerPane();
-          const unsure = renderAnswer(m.text, meta);
+          const unsure = renderAnswer(m.text, meta, mode);
           if (unsure) setTag("? = low confidence — double-check", "warn");
           else cacheSet(ckey, m.text); // only cache answers the model was sure about
+          handleAnswerFinished(m.text, meta, mode);
           p.disconnect(); port = null;
         } else if (m.type === "error") {
           finished = true;
@@ -1001,7 +1327,7 @@
         else setStatus("err: connection lost — highlight again");
       });
 
-      p.postMessage({ type: "ASK", text: prompt, apiKey, image });
+      p.postMessage({ type: "ASK", text: prompt, apiKey, image, mode });
     }
 
     connect();
@@ -1015,19 +1341,22 @@
     dragOX = e.clientX - r.left; dragOY = e.clientY - r.top;
     e.preventDefault();
   });
+  // ── Drag & Resize ────────────────────────────────────────────────────────
   document.addEventListener("mousemove", e => {
     if (dragging) {
       overlay.style.left = e.clientX - dragOX + "px";
       overlay.style.top = e.clientY - dragOY + "px";
       overlay.style.right = "auto"; overlay.style.bottom = "auto";
+      e.stopPropagation();
     }
     if (resizing) {
       overlay.style.width = Math.max(240, resStartW + (e.clientX - resStartX)) + "px";
       overlay.style.height = Math.max(160, resStartH + (e.clientY - resStartY)) + "px";
       overlay.style.maxHeight = "none";
+      e.stopPropagation();
     }
-  });
-  document.addEventListener("mouseup", () => { dragging = false; resizing = false; });
+  }, true);
+  document.addEventListener("mouseup", () => { dragging = false; resizing = false; }, true);
   rzHandle.addEventListener("mousedown", e => {
     resizing = true;
     resStartX = e.clientX; resStartY = e.clientY;
@@ -1037,7 +1366,7 @@
   // ── Event & Focus Isolation ──────────────────────────────────────────────
   // 1) Prevent focus theft: e.preventDefault() on mousedown ensures the browser never shifts
   //    document.activeElement away from the host page (e.g. active form fields or text inputs).
-  // 2) Prevent mouse, pointer, clipboard, and keyboard events from bubbling past the shadow boundary to host listeners.
+  // 2) Prevent mouse, pointer, clipboard, and keyboard events from bubbling or capturing to host listeners.
   const POINTER_EVENTS = [
     "mousedown", "mouseup", "click", "dblclick", "auxclick",
     "pointerdown", "pointerup", "pointercancel", "contextmenu"
@@ -1057,15 +1386,24 @@
         resizing = false;
       }
       e.stopPropagation();
-    });
+    }, true);
 
-    // Ensure events never escape the shadow host element in the page DOM
-    host.addEventListener(type, e => e.stopPropagation());
+    // Ensure events never escape the shadow host element in the page DOM (both capture & bubble)
+    host.addEventListener(type, e => e.stopPropagation(), true);
+    host.addEventListener(type, e => e.stopPropagation(), false);
   });
 
   // Keep typing or editing in the overlay from triggering the host page's keyboard shortcuts or listeners
-  ["keydown", "keyup", "keypress", "copy", "cut", "paste"].forEach(type => {
-    overlay.addEventListener(type, e => e.stopPropagation());
-    host.addEventListener(type, e => e.stopPropagation());
+  const KEY_INPUT_EVENTS = [
+    "keydown", "keyup", "keypress", "copy", "cut", "paste",
+    "input", "beforeinput", "change", "compositionstart", "compositionend"
+  ];
+
+  KEY_INPUT_EVENTS.forEach(type => {
+    overlay.addEventListener(type, e => e.stopPropagation(), true);
+    host.addEventListener(type, e => e.stopPropagation(), true);
+    host.addEventListener(type, e => e.stopPropagation(), false);
+    promptIn?.addEventListener(type, e => e.stopPropagation(), true);
+    keyIn?.addEventListener(type, e => e.stopPropagation(), true);
   });
 })();
