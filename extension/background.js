@@ -107,7 +107,7 @@ chrome.runtime.onConnect.addListener(port => {
   port.onDisconnect.addListener(() => { gone = true; ctrl.abort(); });
   port.onMessage.addListener(msg => {
     if (msg.type !== "ASK") return;
-    streamGemini(msg.text, HARDCODED_KEY || msg.apiKey, ctrl.signal, post, msg.image)
+    streamGemini(msg.text, HARDCODED_KEY || msg.apiKey, ctrl.signal, post, msg.image, msg.mode || "quiz")
       .catch(err => post({ type: "error", message: err?.message || "unknown error" }));
   });
 });
@@ -165,19 +165,45 @@ function rankModels() {
   ];
 }
 
-const SYSTEM_PROMPT = `You are a precise, concise AI assistant inside a browser extension.
+const SYSTEM_PROMPT = `You are a high-speed, high-accuracy quiz and academic AI.
+Form serialization: dropdowns=[Dropdown #n for item "…" — choices: 1.…], radios=( )/(x), checkboxes=[ ]/[x], blanks=[Blank input].
 
-The user message starts with a TASK instruction, followed by CONTENT taken from a webpage.
-Form controls are serialized: dropdowns as [Dropdown #n for item "…" — choose exactly one of: 1. … 2. …], radio buttons as ( ) / (x), checkboxes as [ ] / [x], inputs as [Input: …] / [Blank input].
+CONTEXT USAGE & RESOLUTION:
+1. WHEN PAGE OPTIONS ARE PROVIDED (multiple-choice / dropdown / matching in CONTENT):
+   - Answer MUST be the correct option copied VERBATIM from the provided choices. Never rephrase, summarize, or alter characters.
+2. WHEN NO PAGE OPTIONS ARE PROVIDED (factual question, concept, open question, or general search):
+   - Directly answer from authoritative factual/world knowledge with extreme precision.
+   - For identification/factual questions, output the exact answer directly.
+   - For general queries, answer concisely in 1-2 clear sentences.
+3. STRICT CONTEXT ISOLATION:
+   - Do not use surrounding unrelated page context or navigation text if it does not belong to the highlighted question.
+4. OUTPUT FORMAT:
+   - Begin immediately with the answer on token 1.
+   - Zero preamble, zero prefixes ("Answer:", "Result:"), and no question restatement.
+   - If not confident, append " [?]" to that answer line.`;
 
-CRITICAL ANTI-HALLUCINATION RULES:
-- Focus STRICTLY and ONLY on the user's targeted question or highlight.
-- If surrounding context contains other questions, navigation bars, headers, or unrelated quiz items, IGNORE THEM COMPLETELY. Do NOT attempt to answer questions that were not asked.
-- Whenever answer options (dropdowns, choices, matching items) are provided, the answer MUST ONLY be the option text copied VERBATIM from the list. Do NOT give background knowledge, definitions, or textbook explanations.
-- For matching questions with dropdowns, output ONLY: <item> → <option text>.
-- Be as SHORT as possible. Output ONLY the direct answer.
-- Zero filler, zero explanations, zero preamble, no restating the question.
-- If you are not confident in an answer, append " [?]" to that line.`;
+const EXPOUND_SYSTEM_PROMPT = `You are an expert academic tutor providing fast, high-density explanations.
+Break down why the answer is correct with maximal clarity and minimal fluff.
+
+FORMAT:
+• Core Concept: 1-2 clear sentences explaining why this answer is correct.
+• Step-by-Step Logic: Concise reasoning, formulas, or derivations.
+• Key Distractor (if multiple choice): Briefly why common alternatives are incorrect.
+
+Start immediately with the explanation. Do not use filler introductions.`;
+
+const MANUAL_SYSTEM_PROMPT = `You are a high-speed, authoritative academic AI assistant with comprehensive real-time and factual knowledge.
+
+DECISION PROTOCOL (WHEN TO USE CONTEXT VS. DIRECT SEARCH):
+1. IF [CONTEXT FROM PAGE] IS PROVIDED:
+   - Determine if [FOLLOW-UP QUERY] is actually referring to that context (e.g. asking why, comparing options, asking for steps, or continuing the problem).
+   - If it is a genuine follow-up, use the context to provide a precise, context-aware answer.
+   - If the user's query is on a different topic, a standalone factual question, math problem, code request, or independent search query: COMPLETELY DISREGARD the page context and answer directly from factual world knowledge.
+2. IF NO CONTEXT IS PROVIDED:
+   - Answer the query directly, factually, and accurately as a direct lookup/search.
+3. OUTPUT:
+   - Start immediately on token 1 with the direct solution.
+   - No preamble, no "Based on the context", no conversational fluff.`;
 
 function sleep(ms, signal) {
   return new Promise(resolve => {
@@ -364,7 +390,7 @@ function race(order, body, apiKey, signal, post) {
 }
 
 // ── Call Google Gemini (streaming, routed across MODELS) ────────────────
-async function streamGemini(userText, apiKey, signal, post, image = null) {
+async function streamGemini(userText, apiKey, signal, post, image = null, mode = "quiz") {
   const parts = [];
   if (image && image.base64) {
     parts.push({
@@ -376,10 +402,20 @@ async function streamGemini(userText, apiKey, signal, post, image = null) {
   }
   parts.push({ text: userText });
 
+  let sysPrompt = SYSTEM_PROMPT;
+  if (mode === "expound") {
+    sysPrompt = EXPOUND_SYSTEM_PROMPT;
+  } else if (mode === "manual") {
+    sysPrompt = MANUAL_SYSTEM_PROMPT;
+  }
+
   const body = JSON.stringify({
-    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    systemInstruction: { parts: [{ text: sysPrompt }] },
     contents: [{ role: "user", parts: parts }],
-    generationConfig: { temperature: 0.2, maxOutputTokens: 4096 }
+    generationConfig: {
+      temperature: mode === "quiz" ? 0.0 : (mode === "manual" ? 0.1 : 0.2),
+      maxOutputTokens: mode === "quiz" ? 1024 : 2048
+    }
   });
   const why = e =>
     e.status === 429 ? "rate limited" :
