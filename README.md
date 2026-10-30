@@ -1,72 +1,112 @@
 <div align="center">
 
-<img src="extension/icons/icon128.png" width="96" alt="Canvax logo" />
+<img src="extension/icons/icon128.png" width="88" height="88" alt="Canvax Logo" />
 
 # Canvax
 
-Instant AI answers directly on your screen. Highlight text on any page to stream answers in a clean, discrete floating window.
+**Zero-friction, in-page AI assistance for web-based assessments and reading.**
 
-[**Download for Chrome / Edge / Brave**](https://github.com/zynthoz/canvaxV2/releases/latest/download/canvax-chrome.zip) &nbsp;&bull;&nbsp; [**Download for Firefox**](https://github.com/zynthoz/canvaxV2/releases/latest/download/canvax-firefox.zip)
+Canvax streams contextual answers and in-depth conceptual breakdowns directly onto your screen through a non-intrusive floating overlay, eliminating tab switching and window toggling entirely.
+
+[**Download for Chromium** (Chrome, Edge, Brave)](https://github.com/zynthoz/canvaxV2/releases/latest/download/canvax-chrome.zip) &nbsp;&bull;&nbsp; [**Download for Firefox**](https://github.com/zynthoz/canvaxV2/releases/latest/download/canvax-firefox.zip)
 
 </div>
 
-<br />
+---
 
-## Quick Install
+## Why Canvax
 
-1. Download **canvax-chrome.zip** above and unzip it to a folder.
-2. Open `chrome://extensions` (or `edge://extensions` in Edge).
-3. Toggle on **Developer mode** in the top right.
-4. Click **Load unpacked** and choose your unzipped folder.
-5. Press **Alt + Q** on any page to open Canvax, paste your free [Google Gemini API Key](https://aistudio.google.com/app/apikey), and you're set.
+Most AI tools force disruptive workflows: copy text, switch tabs, prompt an LLM, switch back, and refocus. On proctored platforms and timed assessments, switching windows triggers blur detection, flag counters, and loss of focus.
 
-> **Firefox users:** Download `canvax-firefox.zip`, visit `about:debugging#/runtime/this-firefox`, and click **Load Temporary Add-on**.
+Canvax is engineered from the ground up to solve this:
 
-<br />
+- **Zero window switches:** Runs natively within the active document. You never Alt+Tab or leave the viewport.
+- **Zero focus theft:** Clicking buttons, copying text, or dragging the interface never steals page focus (`blur` / `focusout` proof).
+- **Proctor-resilient design:** Encapsulated in a closed Shadow DOM root with background-thread networking and zero prototype modifications.
+- **Verbatim quiz intelligence:** Intelligently maps questions against live page options, dropdowns, and form elements, while directly answering open-ended items.
 
-## How to Use
+---
 
-- **Highlight Mode (Default):** Highlight any text or question on the page. Canvax automatically detects if real quiz options/controls exist—only attaching options when present, and directly answering open-ended or reading questions from global knowledge without surrounding page clutter.
-- **Manual Prompting & Direct Search:** Type any custom question, math problem, or follow-up in the prompt bar and press `Enter`. Canvax automatically distinguishes between follow-up queries (`[FOL]`) and standalone general knowledge lookups (`[ASK]`). Click the `Linked to current Q [✕]` chip at any time to instantly detach page context and search freely.
-- **Expound on Answers:** Click **Expound** next to Copy to receive an in-depth, step-by-step conceptual explanation and proof. Click **Brief** (or the footer tag) to seamlessly switch back to the concise verbatim answer without consuming extra quota.
-- **Screen Mode:** Open settings (`⚙`), select **Screen**, and click **Done** to scan and solve all visible questions on the page at once.
-- **Toggle Visibility:** Press `Alt + Q` or click the toolbar icon.
-- **Copy:** Click `Copy` next to any specific answer line or copy the whole result with one click.
-- **Controls:** Drag by the top bar to move it anywhere; drag the bottom right corner to resize.
+## Key Capabilities
 
-<br />
+### Highlighting and Instant Answers
+Highlight any question or passage on any webpage. Canvax automatically detects surrounding context, identifies relevant multiple-choice choices or form inputs, and streams the concise answer into the floating interface.
 
-## Discrete & Anti-Detection Architecture
+### Dual-View Answer Engine (Brief vs. Expound)
+- **Brief:** Delivers immediate, high-confidence verbatim answers matching page options.
+- **Expound:** Click **Expound** to view a comprehensive, step-by-step conceptual walkthrough and rationale.
+- **Zero-Token Switching:** Toggling between Brief and Expound views utilizes an in-memory client cache, saving API quota.
 
-Canvax is engineered specifically for privacy, accessibility, and zero-footprint operation:
+### Context-Aware Follow-Up & Standalone Prompts
+Use the prompt bar for ad-hoc math equations, clarifying queries, or quick lookups:
+- **Linked Context:** Ask follow-ups against the highlighted question.
+- **Detached Search:** Click the context badge (`Linked to current Q [x]`) to query Gemini globally without residual page context.
 
-- **Never Counts as Alt+Tab:** Runs natively inside the active browser tab as an in-page element. You never switch windows, click to another app, or lose active focus.
-- **Zero Focus Theft (`blur` / `focusout` proof):** Interacting with the overlay (clicking Expound, Clear, Copy, Settings, or dragging) prevents browser focus shifting. Your active cursor position on the host page is never disrupted.
-- **Keystroke & Input Scoping:** All typing and follow-up prompting in the manual prompt bar is isolated inside the closed shadow root with stopped propagation. Page keyloggers, shortcut listeners, and analytics cannot intercept your keystrokes.
-- **No Native Prototype Tampering:** Proctors and anti-cheat scripts probe browser prototypes for monkey-patching. Canvax performs zero prototype modification, keeping native browser APIs 100% clean and pristine.
-- **Closed Shadow DOM Sandbox:** The entire interface is isolated inside a closed shadow root. Host page scripts and DOM queries cannot inspect, read, or detect the overlay.
-- **Background Worker Network Isolation:** Gemini API requests are executed entirely within the extension service worker / background thread, leaving the host page's network inspection and Fetch/XHR log completely untouched.
-- **Event Boundary Isolation:** Mouse events, keystrokes, and copy operations inside Canvax are scoped to the overlay, preventing page analytics or listeners from intercepting them.
-- **Unlocks Artificial Selection Blocks:** Bypasses CSS properties like `user-select: none` so text remains readable and selectable even on restricted pages.
-- **Visual OCR Fallback:** On pages that hide questions behind HTML5 `<canvas>`, SVG outlines, or obfuscated web fonts, Screen Mode automatically falls back to visual extraction.
+### Multi-Model Hedging and Resilient Streaming
+Canvax coordinates Gemini models (`gemini-3-flash-preview`, `gemini-3.1-flash-lite`, `gemini-3.5-flash-lite`) via a background service worker:
+- **Health memory:** Temporarily deprioritizes rate-limited endpoints.
+- **Hedging:** Dispatches parallel requests if the primary model exhibits latency spikes.
+- **Instant failover:** Guarantees uninterrupted response delivery without manual intervention.
 
-<br />
+### Full-Screen Vision Capture
+When content is protected by HTML5 `<canvas>`, SVG paths, or scrambled font glyphs, switch Canvax to **Screen Mode** to visually capture and interpret rendered items directly via Gemini Vision.
 
-## Features
+---
 
-- **Instant Streaming:** Answers stream directly as they are generated.
-- **One-Click Expound:** Get instant step-by-step conceptual breakdowns and logic behind any answer.
-- **Manual Prompt & Follow-Up:** Type custom prompts or ask clarifying questions on ongoing quiz items.
-- **Form & Quiz Aware:** Recognizes dropdown menus, multiple choice selections, and fill-in-the-blank inputs.
-- **Direct Matching:** Automatically aligns answers with the verbatim options presented on the page.
-- **Dual-View Memory Cache:** Toggle between brief verbatim options and full explanations with zero extra API requests.
-- **Fast Local Cache:** Previous queries are saved locally for instant recall without extra API requests.
-- **Private:** Runs entirely client-side in your browser. No middleman servers, analytics, or external logging.
+## Undetectable Architecture
 
-<br />
+Canvax is built specifically to operate cleanly without leaving detectable footprints on host pages:
 
-## Troubleshooting
+| Layer | Implementation & Mechanism |
+| :--- | :--- |
+| **DOM Isolation** | Encapsulated inside a closed Shadow DOM (`attachShadow({ mode: "closed" })`). Host scripts and standard DOM queries cannot inspect or locate the overlay. |
+| **Prototype Integrity** | Strictly zero monkey-patching or overrides of native JavaScript prototypes (`Event`, `Node`, `Element`, `Window`). Proctors querying prototype integrity detect no anomalies. |
+| **Focus Retention** | Overlay interactions suppress synthetic focus shifts, preserving host cursor and input states without dispatching `blur` or `focusout` events. |
+| **Keystroke Scoping** | Input events in the manual prompt field terminate propagation inside the shadow root, preventing page keyloggers and telemetry listeners from reading inputs. |
+| **Network Isolation** | Model API calls route exclusively through the extension background service worker. The host page's Fetch, XMLHttpRequest, and DevTools network logs remain entirely clean. |
+| **Restriction Bypass** | Counteracts aggressive CSS rules such as `user-select: none` using constructable stylesheets (`adoptedStyleSheets`), keeping text readable and selectable. |
+| **Cross-Frame Support** | Child iframes relay selected questions securely to the top-level frame without spawning redundant DOM nodes in embedded frames. |
 
-- **Overlay won't open:** Reload the webpage after installing or toggling the extension. Chrome blocks extensions on system URLs (`chrome://`).
-- **Invalid Key:** Make sure you created a valid API key in [Google AI Studio](https://aistudio.google.com/app/apikey). Click `⚙` to re-enter your key.
-- **Rate Limits:** If the free tier limit is reached, Canvax will automatically cycle to available fallback models. Wait a few seconds and try again.
+---
+
+## Installation
+
+### Chromium-Based Browsers (Chrome, Edge, Brave, Opera)
+
+1. Download [`canvax-chrome.zip`](https://github.com/zynthoz/canvaxV2/releases/latest/download/canvax-chrome.zip) from the latest release and extract the archive.
+2. Navigate to your browser's extensions page (`chrome://extensions` or `edge://extensions`).
+3. Enable **Developer mode** via the toggle in the upper-right corner.
+4. Click **Load unpacked** and select the unzipped directory.
+5. Press **Alt + Q** on any page to open Canvax.
+6. Enter a free API key from [Google AI Studio](https://aistudio.google.com/app/apikey) and click **Connect**.
+
+### Mozilla Firefox
+
+1. Download [`canvax-firefox.zip`](https://github.com/zynthoz/canvaxV2/releases/latest/download/canvax-firefox.zip) from the latest release.
+2. Navigate to `about:debugging#/runtime/this-firefox`.
+3. Click **Load Temporary Add-on** and select the downloaded ZIP file.
+4. Press **Alt + Q** to activate the overlay and provide your API key.
+
+---
+
+## Usage Reference
+
+- **Toggle Visibility:** Press `Alt + Q` or click the Canvax icon in the browser toolbar.
+- **Reposition & Resize:** Drag using the header bar; resize via the handle in the bottom-right corner.
+- **Copy Results:** Click `Copy` adjacent to any specific answer line or copy the entire output with one click.
+- **Switch Modes:** Open Settings (`Settings / ⚙`) to toggle between **Highlight** and **Screen** modes, adjust color themes (Auto / Dark / Light), or update API keys.
+
+---
+
+## Diagnostics & Troubleshooting
+
+- **Overlay does not appear:** Browser security prevents extensions from running on system pages (`chrome://`, `about:`, Webstore). Ensure you are testing on standard web domains (`https://`). Refresh previously opened tabs after a fresh install.
+- **Invalid API Key:** Verify that the key is generated within [Google AI Studio](https://aistudio.google.com/app/apikey). Click the Settings icon to update the key.
+- **Quota & Rate Limits:** Canvax automatically rotates to healthy fallback models during quota throttling. If rate limits persist, allow a few moments before retrying.
+
+---
+
+## License
+
+Distributed under the MIT License. See [LICENSE](file:///home/aaronlime/code/canvaxV2/LICENSE) for details.
+
