@@ -31,9 +31,13 @@ chrome.commands.onCommand.addListener(command => {
 });
 
 // ── Storage and visibility message handlers ─────────────────────────────
+// ── Storage and visibility message handlers ─────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "SAVE_KEY") {
-    chrome.storage.local.set({ geminiKey: msg.apiKey }, () => {
+    const data = { geminiKey: msg.apiKey };
+    if (msg.provider !== undefined) data.cxProvider = msg.provider;
+    if (msg.model !== undefined) data.cxModel = msg.model;
+    chrome.storage.local.set(data, () => {
       sendResponse({ ok: true });
     });
     return true;
@@ -41,11 +45,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === "GET_KEY") {
     if (HARDCODED_KEY) {
-      sendResponse({ apiKey: HARDCODED_KEY });
+      sendResponse({
+        apiKey: HARDCODED_KEY,
+        provider: detectProvider(HARDCODED_KEY),
+        model: "auto"
+      });
       return true;
     }
-    chrome.storage.local.get("geminiKey", data => {
-      sendResponse({ apiKey: data.geminiKey || null });
+    chrome.storage.local.get(["geminiKey", "cxProvider", "cxModel"], data => {
+      const key = data.geminiKey || null;
+      const detected = detectProvider(key);
+      const provider = (data.cxProvider && data.cxProvider !== "auto") ? data.cxProvider : detected;
+      sendResponse({
+        apiKey: key,
+        provider: provider || "gemini",
+        savedProvider: data.cxProvider || "auto",
+        model: data.cxModel || "auto",
+        detectedProvider: detected
+      });
+    });
+    return true;
+  }
+
+  if (msg.type === "SET_CONFIG") {
+    const updates = {};
+    if (msg.provider !== undefined) updates.cxProvider = msg.provider;
+    if (msg.model !== undefined) updates.cxModel = msg.model;
+    chrome.storage.local.set(updates, () => {
+      sendResponse({ ok: true });
     });
     return true;
   }
@@ -89,14 +116,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// ── Provider Auto-Detection ─────────────────────────────────────────────
+function detectProvider(key) {
+  if (!key || typeof key !== "string") return "gemini";
+  const k = key.trim();
+  if (k.startsWith("gsk_")) return "groq";
+  if (k.startsWith("sk-ant-")) return "anthropic";
+  if (k.startsWith("sk-proj-") || (k.startsWith("sk-") && !k.startsWith("sk-ant-"))) return "openai";
+  if (k.startsWith("AIzaSy")) return "gemini";
+  return "gemini";
+}
+
 // ── Streaming port ──────────────────────────────────────────────────────
-// The overlay opens a port per question. Messages sent back:
-//   { type: "model",  model, label, backup } – which model is answering
-//   { type: "status", message }              – e.g. everything busy, retrying
-//   { type: "chunk",  text }                 – next piece of the answer
-//   { type: "done",   text }                 – full answer
-//   { type: "error",  message, status }      – final failure
-// Disconnecting the port (new highlight, clear, hide) aborts the request.
 chrome.runtime.onConnect.addListener(port => {
   if (port.name !== "gemini-stream") return;
 
@@ -105,36 +136,48 @@ chrome.runtime.onConnect.addListener(port => {
   const post = m => { if (!gone) { try { port.postMessage(m); } catch { } } };
 
   port.onDisconnect.addListener(() => { gone = true; ctrl.abort(); });
-  port.onMessage.addListener(msg => {
+  port.onMessage.addListener(async msg => {
     if (msg.type !== "ASK") return;
-    streamGemini(msg.text, HARDCODED_KEY || msg.apiKey, ctrl.signal, post, msg.image, msg.mode || "quiz")
-      .catch(err => post({ type: "error", message: err?.message || "unknown error" }));
+    const key = HARDCODED_KEY || msg.apiKey;
+    const provider = (msg.provider && msg.provider !== "auto") ? msg.provider : detectProvider(key);
+    const model = msg.model || "auto";
+
+    streamAI({
+      userText: msg.text,
+      apiKey: key,
+      provider,
+      selectedModel: model,
+      signal: ctrl.signal,
+      post,
+      image: msg.image,
+      mode: msg.mode || "quiz"
+    }).catch(err => post({ type: "error", message: err?.message || "unknown error" }));
   });
 });
 
-// ── Model routing ───────────────────────────────────────────────────────
-// Goal: never make the user wait on a model that is down, throttled or slow.
-//
-//  1. HEALTH MEMORY   A model that fails gets a cooldown (429 → its retry delay, 5xx → 20s,
-//                     404/400 → 10 min, timeout → 20s). Cooling models are skipped, so the
-//                     next question goes straight to a healthy one: zero wasted time.
-//  2. INSTANT FAILOVER If an attempt errors before producing text, the next model starts
-//                     in that same moment (no timers, no waiting).
-//  3. HEDGING         If the leading model is merely SLOW (no text after HEDGE_MS), the next
-//                     model is started in parallel. The first to stream text wins; the
-//                     others are aborted. Worst-case added delay ≈ HEDGE_MS.
-//  4. LAST RESORT     If every model failed, wait only as long as the soonest cooldown
-//                     (1–4s) and make one more pass.
-//
-// Listed in order of preference (quality first, then speed/availability).
-const MODELS = ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite"];
+// ── Models & Labels per Provider ─────────────────────────────────────────
+const PROVIDER_MODELS = {
+  gemini: ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite"],
+  openai: ["gpt-4o-mini", "gpt-4o", "chatgpt-4o-latest"],
+  anthropic: ["claude-3-5-haiku-latest", "claude-3-5-sonnet-latest"],
+  groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+};
+
 const LABELS = {
   "gemini-3-flash-preview": "3 flash",
   "gemini-3.1-flash-lite": "3.1 flash lite",
-  "gemini-3.5-flash-lite": "3.5 flash lite"
+  "gemini-3.5-flash-lite": "3.5 flash lite",
+  "gpt-4o-mini": "gpt-4o-mini",
+  "gpt-4o": "gpt-4o",
+  "chatgpt-4o-latest": "gpt-4o-latest",
+  "claude-3-5-haiku-latest": "haiku 3.5",
+  "claude-3-5-sonnet-latest": "sonnet 3.5",
+  "llama-3.3-70b-versatile": "llama 3.3 70b",
+  "llama-3.1-8b-instant": "llama 3.1 8b"
 };
+
 const HEDGE_MS = 4000;           // start the next model in parallel if no text by then
-const ROUNDS = 2;                // full passes over MODELS when everything failed
+const ROUNDS = 2;                // passes when everything failed
 const IDLE_TIMEOUT_MS = 20000;   // abort an attempt if no bytes arrive for this long
 
 // Per-model cooldowns survive service-worker restarts (storage.session is in-memory only).
@@ -155,13 +198,12 @@ function cooldownFor(e) {
 function penalize(model, e) { health[model] = { until: Date.now() + cooldownFor(e) }; saveHealth(); }
 function reward(model) { if (health[model]) { delete health[model]; saveHealth(); } }
 
-// Healthy models first (in preference order), then cooling ones, soonest-recovering first.
-function rankModels() {
+function rankModels(models) {
   const now = Date.now();
   const until = m => health[m]?.until || 0;
   return [
-    ...MODELS.filter(m => until(m) <= now),
-    ...MODELS.filter(m => until(m) > now).sort((a, b) => until(a) - until(b))
+    ...models.filter(m => until(m) <= now),
+    ...models.filter(m => until(m) > now).sort((a, b) => until(a) - until(b))
   ];
 }
 
@@ -212,7 +254,6 @@ function sleep(ms, signal) {
   });
 }
 
-// Gemini puts its suggested wait in error.details[].retryDelay, e.g. "43s".
 function retryDelayMs(errBody, retryAfterHeader) {
   const fromHeader = parseFloat(retryAfterHeader);
   if (fromHeader > 0) return fromHeader * 1000;
@@ -227,19 +268,16 @@ function httpError(status, message, retryAfterMs) {
   const err = new Error(message || `HTTP ${status}`);
   err.status = status;
   err.retryable = status === 429 || status >= 500;
-  // Bad key / no access: a different model won't help, so don't try.
   err.fatal = status === 401 || status === 403 || (status === 400 && /API[ _]key/i.test(message || ""));
   if (retryAfterMs) err.retryAfterMs = Math.min(retryAfterMs, 120000);
   return err;
 }
 
-// One streaming attempt against one model. Calls `emit(text)` for each piece; resolves when
-// the stream ends cleanly, throws on failure. `signal` aborts it (user cancel / lost race).
-async function runModel(model, apiKey, body, signal, emit) {
+// ── SSE Stream Parsers for different API formats ───────────────────────────
+async function runGeminiModel(model, apiKey, payload, signal, emit) {
   const endpoint =
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
-  // Own controller so the idle timeout can abort this attempt and be told apart from `signal`.
   const attemptCtrl = new AbortController();
   const onAbort = () => attemptCtrl.abort();
   signal.addEventListener("abort", onAbort);
@@ -255,7 +293,7 @@ async function runModel(model, apiKey, body, signal, emit) {
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body,
+      body: JSON.stringify(payload.geminiBody),
       signal: attemptCtrl.signal
     });
 
@@ -279,16 +317,16 @@ async function runModel(model, apiKey, body, signal, emit) {
         const line = buf.slice(0, nlIdx).trim();
         buf = buf.slice(nlIdx + 1);
         if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === "[DONE]") continue;
+        const p = line.slice(5).trim();
+        if (!p || p === "[DONE]") continue;
 
         let json;
-        try { json = JSON.parse(payload); } catch { continue; }
+        try { json = JSON.parse(p); } catch { continue; }
         if (json.error) throw httpError(json.error.code || 500, json.error.message, retryDelayMs(json));
 
         blockReason = json.promptFeedback?.blockReason || blockReason;
-        for (const p of json.candidates?.[0]?.content?.parts || []) {
-          if (p.text && !p.thought) { got = true; emit(p.text); }
+        for (const candidatePart of json.candidates?.[0]?.content?.parts || []) {
+          if (candidatePart.text && !candidatePart.thought) { got = true; emit(candidatePart.text); }
         }
       }
     }
@@ -301,7 +339,7 @@ async function runModel(model, apiKey, body, signal, emit) {
     }
   } catch (e) {
     if (timedOut) { const t = new Error("request timed out"); t.retryable = true; throw t; }
-    if (e instanceof TypeError) e.retryable = true; // network failure
+    if (e instanceof TypeError) e.retryable = true;
     throw e;
   } finally {
     clearTimeout(idle);
@@ -309,9 +347,218 @@ async function runModel(model, apiKey, body, signal, emit) {
   }
 }
 
-// One pass over `order`: launch the first model now, then fail over instantly on errors and
-// hedge in parallel when the leader is slow. Resolves with { ok } | { stop } | { err }.
-function race(order, body, apiKey, signal, post) {
+async function runOpenAICompatibleModel(endpoint, model, apiKey, payload, signal, emit, providerName) {
+  const attemptCtrl = new AbortController();
+  const onAbort = () => attemptCtrl.abort();
+  signal.addEventListener("abort", onAbort);
+
+  let timedOut = false, idle, got = false;
+  const arm = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => { timedOut = true; attemptCtrl.abort(); }, IDLE_TIMEOUT_MS);
+  };
+
+  try {
+    arm();
+    const messages = [
+      { role: "system", content: payload.sysPrompt }
+    ];
+
+    const userContent = [];
+    if (payload.image && payload.image.base64) {
+      userContent.push({
+        type: "image_url",
+        image_url: {
+          url: `data:${payload.image.mimeType || "image/jpeg"};base64,${payload.image.base64}`
+        }
+      });
+    }
+    userContent.push({ type: "text", text: payload.userText });
+    messages.push({ role: "user", content: userContent });
+
+    const body = {
+      model,
+      stream: true,
+      temperature: payload.mode === "quiz" ? 0.0 : (payload.mode === "manual" ? 0.1 : 0.2),
+      max_tokens: payload.mode === "quiz" ? 1024 : 2048,
+      messages
+    };
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(body),
+      signal: attemptCtrl.signal
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw httpError(res.status, errBody?.error?.message, retryDelayMs(errBody, res.headers.get("retry-after")));
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      arm();
+      buf += decoder.decode(value, { stream: true });
+
+      let nlIdx;
+      while ((nlIdx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nlIdx).trim();
+        buf = buf.slice(nlIdx + 1);
+        if (!line.startsWith("data:")) continue;
+        const p = line.slice(5).trim();
+        if (!p || p === "[DONE]") continue;
+
+        let json;
+        try { json = JSON.parse(p); } catch { continue; }
+        if (json.error) throw httpError(json.error.code || 500, json.error.message);
+
+        const delta = json.choices?.[0]?.delta?.content;
+        if (delta) { got = true; emit(delta); }
+      }
+    }
+
+    if (!got) {
+      const err = new Error(`empty response from ${providerName}`);
+      err.retryable = true;
+      throw err;
+    }
+  } catch (e) {
+    if (timedOut) { const t = new Error("request timed out"); t.retryable = true; throw t; }
+    if (e instanceof TypeError) e.retryable = true;
+    throw e;
+  } finally {
+    clearTimeout(idle);
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
+async function runAnthropicModel(model, apiKey, payload, signal, emit) {
+  const endpoint = "https://api.anthropic.com/v1/messages";
+
+  const attemptCtrl = new AbortController();
+  const onAbort = () => attemptCtrl.abort();
+  signal.addEventListener("abort", onAbort);
+
+  let timedOut = false, idle, got = false;
+  const arm = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => { timedOut = true; attemptCtrl.abort(); }, IDLE_TIMEOUT_MS);
+  };
+
+  try {
+    arm();
+    const userContent = [];
+    if (payload.image && payload.image.base64) {
+      userContent.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: payload.image.mimeType || "image/jpeg",
+          data: payload.image.base64
+        }
+      });
+    }
+    userContent.push({ type: "text", text: payload.userText });
+
+    const body = {
+      model,
+      stream: true,
+      max_tokens: payload.mode === "quiz" ? 1024 : 2048,
+      temperature: payload.mode === "quiz" ? 0.0 : (payload.mode === "manual" ? 0.1 : 0.2),
+      system: payload.sysPrompt,
+      messages: [{ role: "user", content: userContent }]
+    };
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify(body),
+      signal: attemptCtrl.signal
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw httpError(res.status, errBody?.error?.message, retryDelayMs(errBody, res.headers.get("retry-after")));
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      arm();
+      buf += decoder.decode(value, { stream: true });
+
+      let nlIdx;
+      while ((nlIdx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nlIdx).trim();
+        buf = buf.slice(nlIdx + 1);
+        if (!line.startsWith("data:")) continue;
+        const p = line.slice(5).trim();
+        if (!p || p === "[DONE]") continue;
+
+        let json;
+        try { json = JSON.parse(p); } catch { continue; }
+        if (json.type === "error") {
+          throw httpError(json.error?.type || 500, json.error?.message);
+        }
+        if (json.type === "content_block_delta" && json.delta?.text) {
+          got = true;
+          emit(json.delta.text);
+        }
+      }
+    }
+
+    if (!got) {
+      const err = new Error("empty response from Anthropic");
+      err.retryable = true;
+      throw err;
+    }
+  } catch (e) {
+    if (timedOut) { const t = new Error("request timed out"); t.retryable = true; throw t; }
+    if (e instanceof TypeError) e.retryable = true;
+    throw e;
+  } finally {
+    clearTimeout(idle);
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
+// ── Dispatcher for a single model attempt ──────────────────────────────────
+function executeModel(provider, model, apiKey, payload, signal, emit) {
+  if (provider === "gemini") {
+    return runGeminiModel(model, apiKey, payload, signal, emit);
+  }
+  if (provider === "openai") {
+    return runOpenAICompatibleModel("https://api.openai.com/v1/chat/completions", model, apiKey, payload, signal, emit, "OpenAI");
+  }
+  if (provider === "groq") {
+    return runOpenAICompatibleModel("https://api.groq.com/openai/v1/chat/completions", model, apiKey, payload, signal, emit, "Groq");
+  }
+  if (provider === "anthropic") {
+    return runAnthropicModel(model, apiKey, payload, signal, emit);
+  }
+  return runGeminiModel(model, apiKey, payload, signal, emit);
+}
+
+// ── Multi-model race / failover / hedging ──────────────────────────────────
+function race(provider, order, payload, apiKey, signal, post) {
   return new Promise(resolve => {
     const attempts = [];
     let next = 0, winner = null, settled = false, hedgeTimer = null, lastErr = null, full = "";
@@ -342,21 +589,22 @@ function race(order, body, apiKey, signal, post) {
 
       const emit = text => {
         if (settled) return;
-        if (!winner) { // first model to produce text wins the race
+        if (!winner) {
           winner = a;
           clearTimeout(hedgeTimer);
           attempts.forEach(o => {
             if (o === a || o.failed) return;
-            o.lost = true;            // too slow: abort it and steer the next questions away briefly
+            o.lost = true;
             penalize(o.model, { slow: true });
             o.ctrl.abort();
           });
-          post({ type: "model", model, label: LABELS[model] || model, backup: model !== MODELS[0] });
+          const label = LABELS[model] || model;
+          post({ type: "model", model, label, backup: model !== order[0], provider });
         }
         if (winner === a) { full += text; post({ type: "chunk", text }); }
       };
 
-      runModel(model, apiKey, body, a.ctrl.signal, emit)
+      executeModel(provider, model, apiKey, payload, a.ctrl.signal, emit)
         .then(() => {
           if (winner === a && !settled) {
             reward(model);
@@ -368,16 +616,14 @@ function race(order, body, apiKey, signal, post) {
           if (settled || a.lost) return;
           a.failed = true; lastErr = e;
           penalize(model, e);
-          console.warn(`[canvax] ${model} failed:`, e.status ?? "", e.message);
+          console.warn(`[canvax] ${provider}:${model} failed:`, e.status ?? "", e.message);
 
-          // Auth/blocked, or it died after streaming started (retrying would duplicate text).
           if (e.fatal || winner === a) {
             post({ type: "error", message: e.message, status: e.status });
             return finish({ stop: true });
           }
-          if (winner) return; // another model already won; nothing to do
+          if (winner) return;
 
-          // Failed before producing text → start the next model right now.
           if (!launch() && attempts.every(x => x.failed || x.lost)) finish({ err: lastErr });
         });
 
@@ -389,8 +635,15 @@ function race(order, body, apiKey, signal, post) {
   });
 }
 
-// ── Call Google Gemini (streaming, routed across MODELS) ────────────────
-async function streamGemini(userText, apiKey, signal, post, image = null, mode = "quiz") {
+// ── Unified AI Streaming ──────────────────────────────────────────────────
+async function streamAI({ userText, apiKey, provider, selectedModel, signal, post, image = null, mode = "quiz" }) {
+  let sysPrompt = SYSTEM_PROMPT;
+  if (mode === "expound") {
+    sysPrompt = EXPOUND_SYSTEM_PROMPT;
+  } else if (mode === "manual") {
+    sysPrompt = MANUAL_SYSTEM_PROMPT;
+  }
+
   const parts = [];
   if (image && image.base64) {
     parts.push({
@@ -402,39 +655,57 @@ async function streamGemini(userText, apiKey, signal, post, image = null, mode =
   }
   parts.push({ text: userText });
 
-  let sysPrompt = SYSTEM_PROMPT;
-  if (mode === "expound") {
-    sysPrompt = EXPOUND_SYSTEM_PROMPT;
-  } else if (mode === "manual") {
-    sysPrompt = MANUAL_SYSTEM_PROMPT;
-  }
-
-  const body = JSON.stringify({
+  const geminiBody = {
     systemInstruction: { parts: [{ text: sysPrompt }] },
-    contents: [{ role: "user", parts: parts }],
+    contents: [{ role: "user", parts }],
     generationConfig: {
       temperature: mode === "quiz" ? 0.0 : (mode === "manual" ? 0.1 : 0.2),
       maxOutputTokens: mode === "quiz" ? 1024 : 2048
     }
-  });
+  };
+
+  const payload = {
+    userText,
+    sysPrompt,
+    image,
+    mode,
+    geminiBody
+  };
+
+  const availableModels = PROVIDER_MODELS[provider] || PROVIDER_MODELS.gemini;
+  let order;
+  if (provider === "gemini") {
+    // Fallback and hedging race across healthy models is active for the default config (Gemini)
+    if (selectedModel && selectedModel !== "auto" && selectedModel !== "fastest") {
+      order = [selectedModel];
+    } else {
+      order = rankModels(availableModels);
+    }
+  } else {
+    // For non-Gemini providers, do not fallback across different models: use the specified model (or primary default)
+    const modelToUse = (selectedModel && selectedModel !== "auto" && selectedModel !== "fastest")
+      ? selectedModel
+      : availableModels[0];
+    order = [modelToUse];
+  }
+
   const why = e =>
     e.status === 429 ? "rate limited" :
-      e.status >= 500 ? "Gemini busy" :
+      e.status >= 500 ? `${provider} busy` :
         /timed out/i.test(e.message) ? "timed out" : "hiccup";
 
   await healthReady;
   let lastErr = null;
 
   for (let round = 1; round <= ROUNDS; round++) {
-    const res = await race(rankModels(), body, apiKey, signal, post);
+    const res = await race(provider, order, payload, apiKey, signal, post);
     if (res.ok || res.stop || signal.aborted) return;
     lastErr = res.err;
 
-    // Every model failed. If it looks transient, wait only until the soonest one recovers.
     if (round < ROUNDS && lastErr?.retryable) {
-      const soonest = Math.min(...MODELS.map(m => health[m]?.until || 0)) - Date.now();
+      const soonest = Math.min(...order.map(m => health[m]?.until || 0)) - Date.now();
       const wait = Math.min(4000, Math.max(1000, soonest));
-      post({ type: "status", message: `${why(lastErr)} on every model — retrying in ${Math.ceil(wait / 1000)}s…` });
+      post({ type: "status", message: `${why(lastErr)} on ${provider} — retrying in ${Math.ceil(wait / 1000)}s…` });
       await sleep(wait, signal);
       if (signal.aborted) return;
     } else {
@@ -444,3 +715,4 @@ async function streamGemini(userText, apiKey, signal, post, image = null, mode =
 
   post({ type: "error", message: lastErr?.message || "request failed", status: lastErr?.status });
 }
+
