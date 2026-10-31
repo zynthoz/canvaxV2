@@ -30,10 +30,26 @@ Most AI assistants make you copy text, switch windows, prompt a chatbot, and swi
 ## What It Does
 
 - **Highlight to Answer:** Select any question on the screen. Canvax reads the question, identifies multiple-choice choices or form inputs, and streams the answer instantly.
+- **Multi-Model & Provider Support:** Bring your own API key for **Google Gemini**, **OpenAI**, **Anthropic Claude**, or **Groq**. Canvax auto-detects the provider from your key format or lets you choose specific models in Settings.
 - **Brief or In-Depth:** Get the concise answer right away. Need the proof? Click **Expound** for a full step-by-step breakdown without consuming extra API quota.
 - **Follow-Up Prompting:** Type clarifying questions or solve quick math in the built-in prompt bar. Keep it linked to the current question or detach to search freely.
 - **Screen Mode (Vision):** For questions locked inside canvas graphics, images, or protected text, scan the visible screen directly with vision AI.
 - **Always Available:** Press `Alt + Q` to show or hide the overlay anytime. Drag to reposition, resize to fit your view.
+
+---
+
+## Supported AI Providers & Models
+
+Canvax automatically detects your provider from the key format, or you can select your preferred provider and model directly in **Settings (⚙)**:
+
+| Provider | Supported Models | Key Format | Where to Get |
+| :--- | :--- | :--- | :--- |
+| **Google Gemini** *(Default)* | Gemini 3 Flash, Gemini 3.1 Flash Lite, Gemini 3.5 Flash Lite | `AIzaSy...` | [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| **OpenAI** | GPT-4o Mini, GPT-4o, ChatGPT-4o Latest | `sk-...` / `sk-proj-...` | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| **Anthropic** | Claude 3.5 Haiku, Claude 3.5 Sonnet | `sk-ant-...` | [Anthropic Console](https://console.anthropic.com/settings/keys) |
+| **Groq** | Llama 3.3 70B Versatile, Llama 3.1 8B Instant | `gsk_...` | [Groq Console](https://console.groq.com/keys) |
+
+*Intelligent fallback & hedging (Default Gemini config):* When using Google Gemini, Canvax automatically maintains cooldowns and parallel hedging across the Gemini models to fail over instantly without wasting time if a model is rate-limited or busy. For other providers, queries directly target your chosen model with standard retry handling.
 
 ---
 
@@ -56,7 +72,7 @@ Built for total privacy and zero-footprint operation:
 1. Download [`canvax-chrome.zip`](https://github.com/zynthoz/canvaxV2/releases/latest/download/canvax-chrome.zip) and unzip it.
 2. Go to `chrome://extensions` (or `edge://extensions`) and turn on **Developer mode** (top right).
 3. Click **Load unpacked** and select the unzipped folder.
-4. Press **Alt + Q** on any page, paste your free [Google Gemini API Key](https://aistudio.google.com/app/apikey), and click **Connect**.
+4. Press **Alt + Q** on any page, paste your API key (Google Gemini, OpenAI, Anthropic, or Groq), and click **Connect**.
 
 ### Firefox
 1. Download [`canvax-firefox.zip`](https://github.com/zynthoz/canvaxV2/releases/latest/download/canvax-firefox.zip).
@@ -70,7 +86,7 @@ Built for total privacy and zero-footprint operation:
 - `Alt + Q` — Toggle overlay visibility
 - `Enter` — Send question or follow-up prompt
 - `Expound / Brief` — Switch between in-depth explanations and verbatim answers
-- `Settings (⚙)` — Switch between Highlight and Screen modes, choose themes (Dark / Light / Auto), or update your key
+- `Settings (⚙)` — Select AI Provider & Model, switch between Highlight and Screen modes, choose themes (Dark / Light / Auto), or update your key
 
 ---
 

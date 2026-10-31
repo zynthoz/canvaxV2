@@ -91,6 +91,7 @@
   if (document.getElementById("cx-host")) return;
 
   let visible = false, lastText = "", idleTimer = null, apiKey = null;
+  let currentProvider = "auto", currentModel = "auto";
   let currentMode = "highlight"; // "highlight" | "screen"
   let dragging = false, dragOX = 0, dragOY = 0;
   let resizing = false, resStartX, resStartY, resStartW, resStartH;
@@ -127,9 +128,19 @@
 
     <!-- Setup / first-run key entry -->
     <div id="cx-setup">
-      <div id="cx-setup-t">Connect Gemini API</div>
-      <div id="cx-setup-d">Paste your key from <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>.</div>
-      <input id="cx-ki" type="password" placeholder="AIzaSy..." autocomplete="off" spellcheck="false" />
+      <div id="cx-setup-t">Connect AI Provider</div>
+      <div id="cx-setup-d">Paste your API key. Provider is auto-detected, or choose one manually below.</div>
+      <div class="cx-set-row" style="margin-bottom:2px">
+        <span class="cx-set-label">Provider</span>
+        <select id="cx-setup-prov" class="cx-select">
+          <option value="auto">Auto-detect from key</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic Claude</option>
+          <option value="groq">Groq (Ultra-fast)</option>
+        </select>
+      </div>
+      <input id="cx-ki" type="password" placeholder="AIzaSy... / sk-... / gsk_..." autocomplete="off" spellcheck="false" />
       <div id="cx-setup-btns">
         <button id="cx-kb" style="display:none">Back</button>
         <button id="cx-ks">Connect</button>
@@ -139,6 +150,22 @@
 
     <!-- Settings panel -->
     <div id="cx-settings" style="display:none">
+      <div class="cx-set-row">
+        <span class="cx-set-label">Provider</span>
+        <select id="cx-prov-sel" class="cx-select">
+          <option value="auto">Auto (from key)</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic Claude</option>
+          <option value="groq">Groq (Ultra-fast)</option>
+        </select>
+      </div>
+      <div class="cx-set-row">
+        <span class="cx-set-label">Model</span>
+        <select id="cx-model-sel" class="cx-select">
+          <option value="auto">Auto (fast failover)</option>
+        </select>
+      </div>
       <div class="cx-set-row">
         <span class="cx-set-label">Mode</span>
         <div id="cx-modes">
@@ -235,6 +262,88 @@
   const ctxChip   = $("cx-ctx-chip");
   const ctxTxt    = $("cx-ctx-txt");
   const ctxDel    = $("cx-ctx-del");
+  const setupProv = $("cx-setup-prov");
+  const provSel   = $("cx-prov-sel");
+  const modelSel  = $("cx-model-sel");
+
+  const PROVIDER_MODEL_CHOICES = {
+    gemini: [
+      { id: "auto", label: "Auto (Fast Failover & Hedging)" },
+      { id: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
+      { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
+      { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite" }
+    ],
+    openai: [
+      { id: "gpt-4o-mini", label: "GPT-4o Mini (Default)" },
+      { id: "gpt-4o", label: "GPT-4o (High Accuracy)" },
+      { id: "chatgpt-4o-latest", label: "ChatGPT-4o Latest" }
+    ],
+    anthropic: [
+      { id: "claude-3-5-haiku-latest", label: "Claude 3.5 Haiku (Default)" },
+      { id: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet (High Accuracy)" }
+    ],
+    groq: [
+      { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (Default)" },
+      { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B (Instant)" }
+    ]
+  };
+
+  function updateModelDropdown(prov, selected) {
+    if (!modelSel) return;
+    const effectiveProv = (prov && prov !== "auto") ? prov : detectKeyProvider(keyIn.value || apiKey || "");
+    const list = PROVIDER_MODEL_CHOICES[effectiveProv] || PROVIDER_MODEL_CHOICES.gemini;
+    modelSel.innerHTML = "";
+    list.forEach(m => {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.label;
+      if (m.id === selected) opt.selected = true;
+      modelSel.appendChild(opt);
+    });
+  }
+
+  function detectKeyProvider(k) {
+    const s = (k || "").trim();
+    if (s.startsWith("gsk_")) return "groq";
+    if (s.startsWith("sk-ant-")) return "anthropic";
+    if (s.startsWith("sk-proj-") || (s.startsWith("sk-") && !s.startsWith("sk-ant-"))) return "openai";
+    return "gemini";
+  }
+
+  function updateSetupPlaceholders() {
+    const prov = setupProv?.value || "auto";
+    const det = prov === "auto" ? detectKeyProvider(keyIn.value || apiKey || "") : prov;
+    if (det === "openai") keyIn.placeholder = "sk-proj-... / sk-...";
+    else if (det === "anthropic") keyIn.placeholder = "sk-ant-...";
+    else if (det === "groq") keyIn.placeholder = "gsk_...";
+    else keyIn.placeholder = "AIzaSy...";
+  }
+
+  setupProv?.addEventListener("change", () => {
+    updateSetupPlaceholders();
+    if (provSel) provSel.value = setupProv.value;
+    updateModelDropdown(setupProv.value, currentModel);
+  });
+
+  provSel?.addEventListener("change", () => {
+    currentProvider = provSel.value;
+    if (setupProv) setupProv.value = currentProvider;
+    updateModelDropdown(currentProvider, currentModel);
+    chrome.runtime.sendMessage({
+      type: "SET_CONFIG",
+      provider: currentProvider,
+      model: modelSel?.value || "auto"
+    });
+  });
+
+  modelSel?.addEventListener("change", () => {
+    currentModel = modelSel.value;
+    chrome.runtime.sendMessage({
+      type: "SET_CONFIG",
+      provider: provSel?.value || "auto",
+      model: currentModel
+    });
+  });
 
   // ── Panels ──────────────────────────────────────────────────────────────
   function hideAll3() {
@@ -247,14 +356,29 @@
   function showSetup() {
     hideAll3(); setupEl.style.display = "flex"; errEl.textContent = "";
     kbBtn.style.display = apiKey ? "" : "none";
-    keyIn.placeholder = apiKey ? "> new key_" : "> key_";
     keyIn.value = "";
+    if (setupProv) setupProv.value = currentProvider;
+    updateSetupPlaceholders();
   }
-  function showSettings() { hideAll3(); settingsEl.style.display = "flex"; }
+  function showSettings() {
+    hideAll3(); settingsEl.style.display = "flex";
+    if (provSel) provSel.value = currentProvider;
+    updateModelDropdown(currentProvider, currentModel);
+  }
 
   // ── Init ────────────────────────────────────────────────────────────────
   chrome.runtime.sendMessage({ type: "GET_KEY" }, r => {
-    if (r?.apiKey) { apiKey = r.apiKey; showMain(); } else showSetup();
+    if (r?.apiKey) {
+      apiKey = r.apiKey;
+      currentProvider = r.savedProvider || "auto";
+      currentModel = r.model || "auto";
+      if (provSel) provSel.value = currentProvider;
+      if (setupProv) setupProv.value = currentProvider;
+      updateModelDropdown(currentProvider, currentModel);
+      showMain();
+    } else {
+      showSetup();
+    }
   });
 
   // ── Key save ────────────────────────────────────────────────────────────
@@ -262,11 +386,28 @@
     const k = keyIn.value.trim();
     if (!k) { errEl.textContent = "no key"; return; }
     ksBtn.disabled = true; ksBtn.textContent = "...";
-    chrome.runtime.sendMessage({ type: "SAVE_KEY", apiKey: k }, () => {
-      apiKey = k; ksBtn.disabled = false; ksBtn.textContent = "connect"; showMain();
+    const selectedProv = setupProv?.value || "auto";
+    chrome.runtime.sendMessage({
+      type: "SAVE_KEY",
+      apiKey: k,
+      provider: selectedProv,
+      model: currentModel || "auto"
+    }, () => {
+      apiKey = k;
+      currentProvider = selectedProv;
+      ksBtn.disabled = false;
+      ksBtn.textContent = "connect";
+      if (provSel) provSel.value = currentProvider;
+      updateModelDropdown(currentProvider, currentModel);
+      showMain();
     });
   });
   keyIn.addEventListener("keydown", e => { if (e.key === "Enter") ksBtn.click(); });
+  keyIn.addEventListener("input", () => {
+    if (setupProv && setupProv.value === "auto") {
+      updateSetupPlaceholders();
+    }
+  });
   kbBtn.addEventListener("click", () => { if (apiKey) showMain(); });
 
   // ── Settings ────────────────────────────────────────────────────────────
@@ -1237,13 +1378,13 @@
 
   function errText(m) {
     if (m.status === 429) return "rate limited — wait a moment, then highlight again";
-    if (m.status >= 500) return "Gemini is having issues — try again shortly";
+    if (m.status >= 500) return "AI provider is busy — try again shortly";
     if (/timed out/i.test(m.message)) return "request timed out — highlight again";
     if (/failed to fetch|networkerror|load failed/i.test(m.message)) return "offline — check your connection";
     return m.message;
   }
 
-  // ── Ask Gemini ──────────────────────────────────────────────────────────
+  // ── Ask AI ──────────────────────────────────────────────────────────────
   async function ask(text, fresh = false, image = null, mode = "quiz") {
     if (!apiKey) { showSetup(); return; }
     cancelRequest();
@@ -1257,7 +1398,7 @@
     setTag();
 
     const prompt = mode === "quiz" ? buildPrompt(text) : text;
-    const ckey = hash(mode + "_" + prompt + (image?.base64 ? "_img" : ""));
+    const ckey = hash(mode + "_" + currentProvider + "_" + currentModel + "_" + prompt + (image?.base64 ? "_img" : ""));
     const meta = mode === "quiz" ? parseOptions(text) : { dropdowns: [], choices: [], all: [] };
 
     if (!fresh) {
@@ -1288,7 +1429,7 @@
         if (id !== reqId) return; // stale reply from a cancelled request
 
         if (m.type === "model") {
-          if (m.backup) setTag("answered by " + m.label); // primary was busy/slow
+          if (m.backup) setTag("answered by " + m.label); // failover model used
         } else if (m.type === "status") {
           setStatus(m.message);
           thinkEl.style.display = "flex";
@@ -1327,7 +1468,15 @@
         else setStatus("err: connection lost — highlight again");
       });
 
-      p.postMessage({ type: "ASK", text: prompt, apiKey, image, mode });
+      p.postMessage({
+        type: "ASK",
+        text: prompt,
+        apiKey,
+        provider: currentProvider,
+        model: currentModel,
+        image,
+        mode
+      });
     }
 
     connect();

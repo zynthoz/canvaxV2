@@ -2,9 +2,15 @@
   "manifest_version": 3,
   "name": "Canvax",
   "version": "3.0",
-  "description": "Terminal AI overlay — highlight text, get instant Gemini answers",
+  "description": "Terminal AI overlay — highlight text, get instant AI answers",
   "permissions": ["activeTab", "clipboardWrite", "scripting", "storage", "tabs"],
-  "host_permissions": ["<all_urls>", "https://generativelanguage.googleapis.com/*"],
+  "host_permissions": [
+    "<all_urls>",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.groq.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },

@@ -680,6 +680,24 @@
   border: 1px solid var(--border);
 }
 
+.cx-select {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-main);
+  font-size: 11px;
+  font-family: inherit;
+  padding: 4px 8px;
+  outline: none;
+  cursor: pointer;
+  max-width: 170px;
+  transition: border-color 0.15s ease;
+}
+
+.cx-select:focus {
+  border-color: var(--primary);
+}
+
 .cx-mode {
   background: transparent;
   border: none;
