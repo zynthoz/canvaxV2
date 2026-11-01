@@ -126,11 +126,17 @@
   align-items: center;
   justify-content: center;
   transition: all 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #cx-close:hover, #cx-cfg:hover {
   background: var(--bg-hover);
   color: var(--text-main);
+}
+
+#cx-close:active, #cx-cfg:active {
+  transform: scale(0.92);
 }
 
 /* ── Main Body ─────────────────────────────────────────────── */
@@ -542,6 +548,10 @@
   color: #ffffff;
 }
 
+#cx-expound:active {
+  transform: scale(0.95);
+}
+
 #cx-copy, #cx-clr {
   background: transparent;
   border: none;
@@ -552,11 +562,17 @@
   padding: 2px 6px;
   border-radius: 4px;
   transition: all 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #cx-copy:hover, #cx-clr:hover {
   background: var(--bg-muted);
   color: var(--text-main);
+}
+
+#cx-copy:active, #cx-clr:active {
+  transform: scale(0.95);
 }
 
 /* ── Setup Panel ───────────────────────────────────────────── */
@@ -621,12 +637,15 @@
   padding: 6px 12px;
   cursor: pointer;
   transition: all 0.15s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #cx-kb:hover {
   background: var(--bg-muted);
   color: var(--text-main);
 }
+#cx-kb:active { transform: scale(0.97); }
 
 #cx-ks {
   flex: 1;
@@ -639,11 +658,14 @@
   font-family: inherit;
   padding: 7px 14px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.1s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #cx-ks:hover { background: var(--primary-hover); }
-#cx-ks:disabled { opacity: 0.5; }
+#cx-ks:active { transform: scale(0.98); }
+#cx-ks:disabled { opacity: 0.5; cursor: not-allowed; }
 
 #cx-err {
   font-size: 11px;
@@ -728,12 +750,15 @@
   padding: 4px 10px;
   cursor: pointer;
   transition: all 0.15s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #cx-rekey:hover {
   background: var(--bg-muted);
   color: var(--text-main);
 }
+#cx-rekey:active { transform: scale(0.97); }
 
 #cx-set-done {
   background: var(--primary);
@@ -745,10 +770,13 @@
   font-family: inherit;
   padding: 6px 14px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.1s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #cx-set-done:hover { background: var(--primary-hover); }
+#cx-set-done:active { transform: scale(0.98); }
 
 /* ── Resize handle ─────────────────────────────────────────── */
 #cx-rz {
