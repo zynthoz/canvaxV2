@@ -42,6 +42,64 @@
 
   const isTopFrame = window.self === window.top;
   const IDLE_MS = 1500, MIN_CHARS = 3, MAX_CHARS = 8000;
+  const MAX_CONTAINER_CHARS = 4000; // a "question block" larger than this is almost certainly page chrome
+
+  // Shared by the child-frame handler AND the top frame — must be initialized before the
+  // child-frame early `return` below (const/let are not hoisted like function declarations).
+  // Placeholder <option>s that are not real answers
+  const PLACEHOLDER = /^(\[?\s*(choose|select|pick)\b.*\]?|[-—–.]+)$/i;
+  const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "OPTION"]);
+
+  // Is this a control a student would actually answer with? Ordinary web pages are full of
+  // inputs that are NOT answers (search boxes, hidden CSRF tokens, login/newsletter forms,
+  // sort/filter dropdowns). Counting those made any page look like a quiz and leaked
+  // unrelated page text (e.g. star counts) into the prompt.
+  const ANSWER_INPUT_TYPES = new Set(["radio", "checkbox", "text", "number"]);
+  const NON_ANSWER_REGION = "nav, header, footer, [role='search'], [role='navigation'], [role='banner'], [role='menu'], form[action*='login'], form[action*='search'], [aria-hidden='true']";
+  const NON_ANSWER_TEXT_HINT = /search|filter|find|query|login|log-in|signin|sign-in|password|e-?mail|user(name)?|subscribe|newsletter|coupon|promo|csrf|token|captcha/i;
+  const NON_ANSWER_SELECT_HINT = /sort|order.?by|per.?page|page.?size|locale|currency|country|jump|nav/i;
+  const NON_ANSWER_CHECK_HINT = /remember|agree|terms|newsletter|subscribe|consent|cookie/i;
+
+  function isAnswerControl(el) {
+    if (!el || el.disabled) return false;
+    const tag = el.tagName;
+    let kind;
+    if (tag === "SELECT") kind = "select";
+    else if (tag === "TEXTAREA") kind = "text";
+    else if (tag === "INPUT") {
+      const t = (el.getAttribute("type") || "text").toLowerCase();
+      if (!ANSWER_INPUT_TYPES.has(t)) return false; // hidden, search, submit, password, email…
+      kind = (t === "radio" || t === "checkbox") ? "check" : "text";
+    } else return false;
+
+    if (el.closest(NON_ANSWER_REGION)) return false;
+    const hint = `${el.name || ""} ${el.id || ""} ${el.getAttribute("placeholder") || ""} ${el.getAttribute("aria-label") || ""} ${el.getAttribute("autocomplete") || ""}`;
+    if (kind === "text" && NON_ANSWER_TEXT_HINT.test(hint)) return false;
+    if (kind === "select" && NON_ANSWER_SELECT_HINT.test(hint)) return false;
+    if (kind === "check" && NON_ANSWER_CHECK_HINT.test(hint)) return false;
+    return true;
+  }
+
+  function countAnswerControls(root) {
+    if (!root?.querySelectorAll) return 0;
+    let n = 0;
+    for (const c of root.querySelectorAll("select, input, textarea")) if (isAnswerControl(c)) n++;
+    return n;
+  }
+
+  const textLen = el => (el?.innerText || el?.textContent || "").length;
+
+  // Builds what gets sent to the model for a highlight. Page context is attached ONLY when the
+  // selection sits inside a real question block (actual answer controls or listed options);
+  // otherwise the bare selection is sent so unrelated page text can't leak into the answer.
+  function buildSelectionPayload(raw, anchorNode) {
+    const container = findContainer(anchorNode);
+    const context = extractContext(container);
+    if (hasRealOptionsOrControls(container, context) && context.length > raw.length) {
+      return `HIGHLIGHTED:\n${raw}\n\nQUESTION BLOCK (the highlighted question with its answer options):\n${context}`;
+    }
+    return raw;
+  }
 
   // ── Child Frame Handler (iframes / embedded quizzes) ──────────────────────
   // If we are inside an iframe, DO NOT inject the overlay DOM.
@@ -67,12 +125,8 @@
         const raw = sel?.toString().trim() ?? "";
         if (!raw || raw.length < MIN_CHARS || raw === lastText) return;
 
-        const container = findContainer(sel.anchorNode);
-        const context = extractContext(container);
         let promptContent = raw;
-        if (hasRealOptionsOrControls(container, context) && context.length > raw.length) {
-          promptContent = `FOCUSED SELECTION: "${raw}"\n\nLOCAL QUESTION CONTEXT & OPTIONS:\n${context}`;
-        }
+        try { promptContent = buildSelectionPayload(raw, sel.anchorNode); } catch {}
 
         lastText = raw;
         try {
@@ -329,20 +383,26 @@
     currentProvider = provSel.value;
     if (setupProv) setupProv.value = currentProvider;
     updateModelDropdown(currentProvider, currentModel);
-    chrome.runtime.sendMessage({
-      type: "SET_CONFIG",
-      provider: currentProvider,
-      model: modelSel?.value || "auto"
-    });
+    try { chrome.storage.local.set({ cxProvider: currentProvider, cxModel: modelSel?.value || "auto" }); } catch {}
+    try {
+      chrome.runtime.sendMessage({
+        type: "SET_CONFIG",
+        provider: currentProvider,
+        model: modelSel?.value || "auto"
+      });
+    } catch {}
   });
 
   modelSel?.addEventListener("change", () => {
     currentModel = modelSel.value;
-    chrome.runtime.sendMessage({
-      type: "SET_CONFIG",
-      provider: provSel?.value || "auto",
-      model: currentModel
-    });
+    try { chrome.storage.local.set({ cxProvider: provSel?.value || "auto", cxModel: currentModel }); } catch {}
+    try {
+      chrome.runtime.sendMessage({
+        type: "SET_CONFIG",
+        provider: provSel?.value || "auto",
+        model: currentModel
+      });
+    } catch {}
   });
 
   // ── Panels ──────────────────────────────────────────────────────────────
@@ -367,42 +427,123 @@
   }
 
   // ── Init ────────────────────────────────────────────────────────────────
-  chrome.runtime.sendMessage({ type: "GET_KEY" }, r => {
-    if (r?.apiKey) {
-      apiKey = r.apiKey;
-      currentProvider = r.savedProvider || "auto";
-      currentModel = r.model || "auto";
+  function applyLoadedKey(key, prov, model) {
+    if (key) {
+      apiKey = key;
+      currentProvider = prov || "auto";
+      currentModel = model || "auto";
       if (provSel) provSel.value = currentProvider;
       if (setupProv) setupProv.value = currentProvider;
       updateModelDropdown(currentProvider, currentModel);
       showMain();
-    } else {
-      showSetup();
+      return true;
     }
-  });
+    return false;
+  }
+
+  // 1) First check local storage directly
+  try {
+    chrome.storage.local.get(["geminiKey", "cxProvider", "cxModel"], data => {
+      if (chrome.runtime.lastError) {}
+      if (!applyLoadedKey(data?.geminiKey, data?.cxProvider, data?.cxModel)) {
+        // Fallback to GET_KEY message (handles HARDCODED_KEY if set in background)
+        try {
+          chrome.runtime.sendMessage({ type: "GET_KEY" }, r => {
+            if (chrome.runtime.lastError) {}
+            if (!applyLoadedKey(r?.apiKey, r?.savedProvider, r?.model)) {
+              showSetup();
+            }
+          });
+        } catch {
+          showSetup();
+        }
+      }
+    });
+  } catch {
+    showSetup();
+  }
 
   // ── Key save ────────────────────────────────────────────────────────────
-  ksBtn.addEventListener("click", () => {
+  function saveAndConnect() {
     const k = keyIn.value.trim();
     if (!k) { errEl.textContent = "no key"; return; }
-    ksBtn.disabled = true; ksBtn.textContent = "...";
+    errEl.textContent = "";
+    ksBtn.disabled = true;
+    ksBtn.textContent = "...";
     const selectedProv = setupProv?.value || "auto";
-    chrome.runtime.sendMessage({
-      type: "SAVE_KEY",
-      apiKey: k,
-      provider: selectedProv,
-      model: currentModel || "auto"
-    }, () => {
+    const selectedModel = currentModel || "auto";
+
+    let completed = false;
+    function finalizeSuccess() {
+      if (completed) return;
+      completed = true;
       apiKey = k;
       currentProvider = selectedProv;
+      currentModel = selectedModel;
       ksBtn.disabled = false;
-      ksBtn.textContent = "connect";
+      ksBtn.textContent = "Connect";
       if (provSel) provSel.value = currentProvider;
       updateModelDropdown(currentProvider, currentModel);
       showMain();
-    });
+    }
+
+    function finalizeError(msg) {
+      if (completed) return;
+      completed = true;
+      ksBtn.disabled = false;
+      ksBtn.textContent = "Connect";
+      errEl.textContent = msg || "failed to save key";
+    }
+
+    // Safety timeout: button is NEVER permanently stuck
+    const guardTimer = setTimeout(() => {
+      if (!completed) finalizeSuccess();
+    }, 1500);
+
+    const payload = {
+      geminiKey: k,
+      cxProvider: selectedProv,
+      cxModel: selectedModel
+    };
+
+    // 1) Direct storage save (guaranteed & immediate)
+    try {
+      chrome.storage.local.set(payload, () => {
+        clearTimeout(guardTimer);
+        if (chrome.runtime.lastError) {
+          finalizeError(chrome.runtime.lastError.message);
+        } else {
+          finalizeSuccess();
+        }
+      });
+    } catch (e) {
+      // Fallback
+    }
+
+    // 2) Message background service worker
+    try {
+      chrome.runtime.sendMessage({
+        type: "SAVE_KEY",
+        apiKey: k,
+        provider: selectedProv,
+        model: selectedModel
+      }, r => {
+        clearTimeout(guardTimer);
+        if (chrome.runtime.lastError) {}
+        if (r?.ok || r) {
+          finalizeSuccess();
+        }
+      });
+    } catch {}
+  }
+
+  ksBtn.addEventListener("click", saveAndConnect);
+  keyIn.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveAndConnect();
+    }
   });
-  keyIn.addEventListener("keydown", e => { if (e.key === "Enter") ksBtn.click(); });
   keyIn.addEventListener("input", () => {
     if (setupProv && setupProv.value === "auto") {
       updateSetupPlaceholders();
@@ -467,11 +608,16 @@
   }
 
   function toggle() {
-    chrome.runtime.sendMessage({ type: "TOGGLE_GLOBAL" });
+    const next = !visible;
+    setVisible(next);
+    try { chrome.storage.local.set({ cxVisible: next }); } catch {}
+    try { chrome.runtime.sendMessage({ type: "TOGGLE_GLOBAL" }); } catch {}
   }
 
   closeBtn.addEventListener("click", () => {
-    chrome.runtime.sendMessage({ type: "SET_GLOBAL_VISIBILITY", visible: false });
+    setVisible(false);
+    try { chrome.storage.local.set({ cxVisible: false }); } catch {}
+    try { chrome.runtime.sendMessage({ type: "SET_GLOBAL_VISIBILITY", visible: false }); } catch {}
   });
 
   chrome.runtime.onMessage.addListener(msg => {
@@ -595,6 +741,9 @@
   // Walk up from the selection to find ONLY the enclosing question container.
   // CRITICAL: Never fall back to document.body or ancestors with multiple questions,
   // which previously leaked the whole page and caused the AI to hallucinate.
+
+  // (isAnswerControl / countAnswerControls / textLen are defined at the top of the file.)
+
   function findContainer(node) {
     let el = node?.nodeType === 1 ? node : node?.parentElement;
     if (!el || el === document.body || el === document.documentElement) return null;
@@ -621,13 +770,13 @@
       const q = el.closest(sel);
       if (q && q !== document.body && q !== document.documentElement) {
         // If q is just an inner text/prompt span or div, check if its parent has the outer question container with controls
-        const hasControls = q.querySelectorAll("select, input, textarea").length > 0;
-        if (hasControls) return q;
+        if (countAnswerControls(q) > 0) return q;
         const outer = q.parentElement?.closest(sel);
-        if (outer && outer !== document.body && outer !== document.documentElement) {
+        if (outer && outer !== document.body && outer !== document.documentElement &&
+            textLen(outer) <= MAX_CONTAINER_CHARS) {
           return outer;
         }
-        return q;
+        if (textLen(q) <= MAX_CONTAINER_CHARS) return q;
       }
     }
 
@@ -636,7 +785,8 @@
     let best = null;
 
     for (let i = 0; i < 8 && curr && curr !== document.body && curr !== document.documentElement; i++) {
-      const hasControls = curr.querySelectorAll("select, input[type='radio'], input[type='checkbox'], input[type='text'], textarea").length > 0;
+      if (textLen(curr) > MAX_CONTAINER_CHARS) break; // grew into page layout, not a question
+      const hasControls = countAnswerControls(curr) > 0;
       if (hasControls) {
         best = curr;
         const cls = curr.className?.toString() || "";
@@ -654,6 +804,7 @@
       if (qCount > 1) break;
 
       const pText = parent.innerText || "";
+      if (pText.length > MAX_CONTAINER_CHARS) break;
       const qHeaders = pText.match(/\bQuestion\s+\d+\b/gi);
       if (qHeaders && qHeaders.length > 1) break;
 
@@ -664,9 +815,7 @@
     return best;
   }
 
-  // Placeholder <option>s that are not real answers
-  const PLACEHOLDER = /^(\[?\s*(choose|select|pick)\b.*\]?|[-—–.]+)$/i;
-  const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "OPTION"]);
+  // (PLACEHOLDER / SKIP_TAGS are defined at the top so iframe frames can use serialize() too.)
 
   // ── Anti-Obfuscation DOM Unmasker & Serializer ──────────────────────────
   // Reads content faithfully even when pages attempt obfuscation via:
@@ -685,7 +834,7 @@
     }
 
     function walk(n) {
-      if (typeof host !== "undefined" && host && n === host) return;
+      if (n.id === "cx-host") return; // never read our own overlay (works in iframes too)
 
       // Text Node
       if (n.nodeType === 3) {
@@ -770,6 +919,7 @@
       }
 
       if (n.tagName === "INPUT") {
+        if (!isAnswerControl(n)) return; // skip search boxes, hidden tokens, etc.
         const type = (n.type || "text").toLowerCase();
         if (type === "radio") out += n.checked ? "(x) " : "( ) ";
         else if (type === "checkbox") out += n.checked ? "[x] " : "[ ] ";
@@ -777,7 +927,7 @@
         return;
       }
       if (n.tagName === "TEXTAREA") {
-        out += "[Blank input] ";
+        if (isAnswerControl(n)) out += "[Blank input] ";
         return;
       }
       if (n.tagName === "BR") { nl(); return; }
@@ -806,7 +956,7 @@
 
   function hasRealOptionsOrControls(container, context) {
     if (!context) return false;
-    if (container?.querySelector?.("select, input, textarea")) return true;
+    if (countAnswerControls(container) > 0) return true;
     if (/\[Dropdown #|\([x ]\)|\[[x ]\]|\[Blank input\]/i.test(context)) return true;
     const optionMatches = context.match(/^\s*(?:[A-Ea-e][.)]|[1-9][.)]|\([A-Ea-e1-9]\))\s+\S+/gm);
     if (optionMatches && optionMatches.length >= 2) return true;
@@ -833,15 +983,9 @@
       if (!t || t.length < MIN_CHARS || t === lastText) return;
       if (host.contains(s?.anchorNode)) return;
 
-      // Extract enriched context ONLY if container contains actual quiz controls/options
-      const container = findContainer(s.anchorNode);
-      const context = extractContext(container);
-      const hasOptions = hasRealOptionsOrControls(container, context);
-      
+      // Enriched context is attached ONLY if the selection sits in a real question block
       let promptContent = t;
-      if (hasOptions && context && context.length > t.length) {
-        promptContent = `FOCUSED SELECTION: "${t}"\n\nLOCAL QUESTION CONTEXT & OPTIONS:\n${context}`;
-      }
+      try { promptContent = buildSelectionPayload(t, s.anchorNode); } catch {}
 
       lastText = t;
       contextDetached = false;
@@ -905,9 +1049,25 @@
     multi:    `SELECT ALL: Output each correct option verbatim on its own line. ${VERBATIM}`,
     truefalse:`TRUE/FALSE: Output ONLY "True" or "False".`,
     fill:     `FILL-IN-THE-BLANK: Output ONLY the exact text/term to enter into the blank. No prefixes, no labels. If multiple blanks, number each on its own line.`,
-    general:  `DIRECT ANSWER: If choices exist, output the verbatim option. Otherwise, answer factually in minimal words.`,
+    question: `QUESTION: Answer it directly. Give the final answer only (a name, term, number with units, or one short sentence). If it lists options, output the correct option verbatim.`,
+    term:     `IDENTIFY: The highlight is a term, name, title, or short phrase — NOT a question. In 1-2 sentences, say what it is or what it means (definition / identification). Do not answer with a single number or word.`,
+    passage:  `PASSAGE: The highlight is a statement or passage — NOT a question. If it is a checkable factual claim, start with "True" or "False" followed by a short reason. Otherwise state its key point/meaning in 1-2 sentences.`,
     page:     `SCAN: Answer each question on its own numbered line (1. <answer>). ${VERBATIM}`
   };
+
+  // Words that typically open a question or an exam instruction.
+  const QUESTION_START = /^(who|whom|whose|what|which|when|where|why|how|is|are|was|were|do|does|did|can|could|should|would|will|has|have|had|name|define|identify|explain|describe|state|list|give|find|solve|calculate|compute|determine|evaluate|simplify|convert|compare|differentiate|distinguish|classify|predict|prove|show|choose|select|match|complete|translate)\b/i;
+
+  // Decide what kind of thing was highlighted when no quiz controls were detected.
+  function classifySelection(text) {
+    const t = text.trim();
+    const words = t.split(/\s+/).length;
+    if (/\?\s*$/m.test(t) || QUESTION_START.test(t)) return "question";
+    if (/[\d)x]\s*[-+*/^×÷=]\s*[\d(x]/i.test(t) && words <= 30) return "question"; // math expression
+    // A short fragment with no sentence punctuation is a name/term/title (e.g. "Amazon Learning Club - UST")
+    if (words <= 12 && !/[.!;]\s+\S/.test(t)) return "term";
+    return "passage";
+  }
 
   function detectType(text) {
     if (currentMode === "screen") return "page";
@@ -922,11 +1082,25 @@
     if (boxes) return "multi";
     if (/\btrue\s*(or|\/)\s*false\b/i.test(text)) return "truefalse";
     if (/\[Blank input\]|_{3,}|fill in the blank|identification|short answer/i.test(text)) return "fill";
-    return "general";
+    // Plain listed options (A. … / B. …) inside the highlight itself
+    if ((text.match(/^\s*(?:[A-Ea-e][.)]|\([A-Ea-e]\))\s+\S+/gm) || []).length >= 2) return "choice";
+    if (text.startsWith("HIGHLIGHTED:\n")) return "question"; // came from a detected question block
+    return classifySelection(text);
+  }
+
+  // Light page hint (title + site) — helps disambiguate names/terms; never treated as the question.
+  function pageHint() {
+    try {
+      const title = (document.title || "").replace(/\s+/g, " ").trim().slice(0, 120);
+      const site = location.hostname.replace(/^www\./, "");
+      return title || site ? `\n\nPAGE (for disambiguation only — not part of the question): ${title}${site ? ` (${site})` : ""}` : "";
+    } catch { return ""; }
   }
 
   function buildPrompt(text) {
-    return `TASK: ${TASKS[detectType(text)]}\n\nCONTENT:\n${text}`;
+    const type = detectType(text);
+    const hint = (type === "term" || type === "passage" || type === "question") ? pageHint() : "";
+    return `TASK: ${TASKS[type]}\n\nCONTENT:\n${text}${hint}`;
   }
 
   // ── Answer cache (persists across pages/sessions) ───────────────────────
@@ -1201,7 +1375,7 @@
 
   function handleAnswerFinished(text, meta, mode) {
     if (mode === "quiz") {
-      savedBriefAnswer = { text, meta, preview: selTxt.textContent, badge: selBadge.textContent, plain: answerPlain };
+      savedBriefAnswer = { text, meta, preview: selTxt.textContent, badge: selBadge.textContent, plain: answerPlain, source: lastAskText };
       savedExpoundAnswer = null;
       currentView = "brief";
       expoundBtn.style.display = "";
@@ -1237,7 +1411,7 @@
 
   // ── Expound on an answer ────────────────────────────────────────────────
   function doExpound() {
-    const questionContext = lastText || (savedBriefAnswer?.preview || "Current question");
+    const questionContext = savedBriefAnswer?.source || lastText || (savedBriefAnswer?.preview || "Current question");
     const currentAnswer = answerPlain || (savedBriefAnswer?.plain || "");
     if (!questionContext && !currentAnswer) return;
 
@@ -1521,24 +1695,31 @@
     "pointerdown", "pointerup", "pointercancel", "contextmenu"
   ];
 
+  // Interactive controls that must process clicks, touch taps, and key input
+  const INTERACTIVE_SELECTOR = "input, textarea, select, option, a, button, [role='button'], .cx-mode, .cx-cp, #cx-tag, #cx-sel";
+
   POINTER_EVENTS.forEach(type => {
+    // Capture phase: side effects only (no stopPropagation here so controls receive events).
     overlay.addEventListener(type, e => {
       if (type === "mousedown") {
-        // Allow text cursor focus only on actual text input elements inside the overlay (e.g. API key)
-        const tag = e.target?.tagName;
-        if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "A") {
+        const isInteractive = !!e.target?.closest?.(INTERACTIVE_SELECTOR);
+        const isTouch = e.pointerType === "touch";
+        // Allow focus and interaction on form controls, dropdowns, and buttons inside the overlay.
+        // Prevent default only on non-interactive backdrop/drag/read areas to prevent focus theft from host.
+        // Never call preventDefault on interactive controls or touch events (preventDefault on touch suppresses click).
+        if (!isInteractive && !isTouch) {
           e.preventDefault();
         }
       }
-      if (type === "mouseup") {
+      if (type === "mouseup" || type === "pointerup") {
         dragging = false;
         resizing = false;
       }
-      e.stopPropagation();
     }, true);
 
-    // Ensure events never escape the shadow host element in the page DOM (both capture & bubble)
-    host.addEventListener(type, e => e.stopPropagation(), true);
+    // Bubble phase: stop the event after overlay controls have handled it,
+    // so it never escapes the shadow host into the page DOM.
+    overlay.addEventListener(type, e => e.stopPropagation(), false);
     host.addEventListener(type, e => e.stopPropagation(), false);
   });
 
@@ -1549,10 +1730,7 @@
   ];
 
   KEY_INPUT_EVENTS.forEach(type => {
-    overlay.addEventListener(type, e => e.stopPropagation(), true);
-    host.addEventListener(type, e => e.stopPropagation(), true);
+    overlay.addEventListener(type, e => e.stopPropagation(), false);
     host.addEventListener(type, e => e.stopPropagation(), false);
-    promptIn?.addEventListener(type, e => e.stopPropagation(), true);
-    keyIn?.addEventListener(type, e => e.stopPropagation(), true);
   });
 })();
