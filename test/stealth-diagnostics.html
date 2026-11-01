@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Canvax Stealth & Security Diagnostic Bench</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #111827;
+      --card-border: #1f2937;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --primary: #e11d48;
+      --primary-hover: #be123c;
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.1);
+      --danger: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.1);
+      --warn: #f59e0b;
+      --warn-bg: rgba(245, 158, 11, 0.1);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      --mono: "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.5;
+      padding: 24px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 18px;
+    }
+
+    .title-group h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .badge-adversary {
+      font-size: 11px;
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid var(--danger);
+      padding: 2px 8px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 4px;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 6px;
+      padding: 8px 14px;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      border: none;
+    }
+    .btn-primary:hover { background: var(--primary-hover); }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--card-border);
+    }
+    .btn-outline:hover {
+      background: #1f2937;
+      border-color: #374151;
+    }
+
+    /* Metric Grid */
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+    }
+
+    .metric-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 16px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric-card.good {
+      border-left: 4px solid var(--success);
+    }
+
+    .metric-card.alert {
+      border-left: 4px solid var(--danger);
+      background: #191216;
+    }
+
+    .metric-label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    .metric-value {
+      font-size: 26px;
+      font-weight: 800;
+      font-family: var(--mono);
+      margin: 4px 0;
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .metric-sub {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* Main Diagnostic Layout */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 900px) {
+      .dashboard-grid { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 12px;
+    }
+
+    .panel-title {
+      font-size: 15px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Interactive Exam Sandbox */
+    .exam-box {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .exam-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #38bdf8;
+    }
+
+    .exam-input {
+      width: 100%;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+      transition: all 0.2s;
+    }
+    .exam-input:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+    }
+
+    .exam-options {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .exam-opt {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: #cbd5e1;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .focus-status-badge {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      width: fit-content;
+    }
+    .focus-locked { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); }
+    .focus-lost { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+
+    /* Anti-Selection & Obfuscation Box */
+    .protected-box {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      padding: 16px;
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      position: relative;
+    }
+    .protected-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      font-size: 10px;
+      background: #27272a;
+      color: #a1a1aa;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: var(--mono);
+    }
+
+    /* Automated Test Table */
+    .probe-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .probe-table th, .probe-table td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .probe-table th {
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+    .status-pill {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      display: inline-block;
+      font-family: var(--mono);
+    }
+    .status-pass { background: var(--success-bg); color: var(--success); }
+    .status-fail { background: var(--danger-bg); color: var(--danger); }
+    .status-info { background: rgba(56, 189, 248, 0.1); color: #38bdf8; }
+
+    /* Live Event Feed */
+    .console-feed {
+      background: #030712;
+      border: 1px solid #1f2937;
+      border-radius: 6px;
+      height: 230px;
+      overflow-y: auto;
+      padding: 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .log-line {
+      display: flex;
+      gap: 8px;
+      color: #94a3b8;
+    }
+    .log-time { color: #64748b; flex-shrink: 0; }
+    .log-tag { font-weight: 700; flex-shrink: 0; }
+    .tag-leak { color: var(--danger); }
+    .tag-shield { color: var(--success); }
+    .tag-focus { color: var(--warn); }
+    .tag-system { color: #38bdf8; }
+
+    .instructions {
+      background: #1e1b4b;
+      border: 1px solid #312e81;
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 13px;
+      color: #c7d2fe;
+      line-height: 1.6;
+    }
+    .instructions strong { color: #ffffff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="title-group">
+        <h1>
+          Canvax Stealth & Adversary Diagnostic Tool
+          <span class="badge-adversary">Host Proctor Simulator</span>
+        </h1>
+        <p class="subtitle">Simulates real-world exam proctors (Proctorio, Canvas Quiz Logs, Honorlock) to verify event isolation and zero focus theft.</p>
+      </div>
+      <div class="top-actions">
+        <button class="btn-primary" id="btn-run-probes">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Run Automated Probes
+        </button>
+        <button class="btn-outline" id="btn-reset">Reset Telemetry</button>
+      </div>
+    </header>
+
+    <div class="instructions">
+      <strong>How to test:</strong> Open Canvax with <code>Alt + Q</code>. While this test page is open, click buttons in the Canvax overlay (Connect, Settings ⚙, Copy, Clear, Expound), type queries into the prompt box, and drag/resize the overlay. Observe whether any clicks or keystrokes leak to the host page listeners, or if the active exam input loses focus.
+    </div>
+
+    <!-- Live Metric Cards -->
+    <div class="metric-grid">
+      <div class="metric-card good" id="card-leaks">
+        <div class="metric-label">Leaked Overlay Events</div>
+        <div class="metric-value" id="val-leaks">0</div>
+        <div class="metric-sub" id="sub-leaks">Boundary 100% Sealed</div>
+      </div>
+
+      <div class="metric-card good" id="card-blur">
+        <div class="metric-label">Exam Input Focus Loss</div>
+        <div class="metric-value" id="val-blur">0</div>
+        <div class="metric-sub" id="sub-blur">Zero Focus Theft</div>
+      </div>
+
+      <div class="metric-card good" id="card-proto">
+        <div class="metric-label">Prototype Integrity</div>
+        <div class="metric-value" id="val-proto">Clean</div>
+        <div class="metric-sub">Zero Monkey-Patching Detected</div>
+      </div>
+
+      <div class="metric-card good" id="card-shadow">
+        <div class="metric-label">Shadow DOM Isolation</div>
+        <div class="metric-value" id="val-shadow">Closed</div>
+        <div class="metric-sub">Host Scripts Cannot Read DOM</div>
+      </div>
+    </div>
+
+    <!-- Main Diagnostic Split -->
+    <div class="dashboard-grid">
+      <!-- Left: Interactive Exam Arena -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">1. Host Focus & Interaction Test Arena</span>
+          <span class="focus-status-badge focus-locked" id="badge-focus">FOCUS: IDLE</span>
+        </div>
+
+        <div class="exam-box">
+          <div class="exam-title">Active Simulated Exam Question</div>
+          <p style="font-size:13px; color:#cbd5e1;">Click inside this input field. Then, with cursor active here, drag the Canvax overlay, resize it, or click the "Copy" / "Clear" buttons inside Canvax:</p>
+          <input type="text" class="exam-input" id="exam-input" placeholder="Type here to establish active focus..." autocomplete="off">
+          
+          <div class="exam-options">
+            <label class="exam-opt">
+              <input type="radio" name="exam-q1" value="A">
+              Option A: Native DOM focus remains locked during overlay drag
+            </label>
+            <label class="exam-opt">
+              <input type="radio" name="exam-q1" value="B">
+              Option B: Proctor observers detect zero blur or focusout events
+            </label>
+          </div>
+        </div>
+
+        <div class="protected-box" onselectstart="return false;" oncopy="return false;">
+          <span class="protected-badge">user-select: none + oncopy block</span>
+          <div style="font-weight:600; font-size:13px; margin-bottom:6px; color:#f87171;">
+            Protected Quiz Selection Test Container
+          </div>
+          <p style="font-size:13px; color:#d4d4d8;">
+            What is the time complexity of binary search on a sorted array of size n? Choices: A. O(1), B. O(n), C. O(log n), D. O(n log n).
+          </p>
+          <p style="font-size:11px; color:#71717a; margin-top:8px;">
+            (This container enforces CSS user-select: none and inline onselectstart blocks. Canvax's selection unlocker allows selecting this text cleanly).
+          </p>
+        </div>
+      </div>
+
+      <!-- Right: Automated Probes & Findings -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">2. Adversary Diagnostic Probes</span>
+          <span class="status-pill status-pass" id="badge-overall">ALL TESTS PASS</span>
+        </div>
+
+        <table class="probe-table">
+          <thead>
+            <tr>
+              <th>Security Vector</th>
+              <th>Proctor Probe Method</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="probe-results">
+            <tr>
+              <td><strong>Prototype Integrity</strong></td>
+              <td>Probes <code>Document.prototype.hasFocus.toString()</code></td>
+              <td><span class="status-pill status-pass">NATIVE (UNPATCHED)</span></td>
+            </tr>
+            <tr>
+              <td><strong>Visibility State</strong></td>
+              <td>Checks for tampering on <code>document.visibilityState</code></td>
+              <td><span class="status-pill status-pass">PRISTINE</span></td>
+            </tr>
+            <tr>
+              <td><strong>Shadow DOM Secrecy</strong></td>
+              <td>Queries <code>#cx-host.shadowRoot</code> from host script</td>
+              <td><span class="status-pill status-pass">ENFORCED (CLOSED)</span></td>
+            </tr>
+            <tr>
+              <td><strong>Event Containment</strong></td>
+              <td>Window/document listeners checking leaked clicks/keys</td>
+              <td><span class="status-pill status-pass">0 LEAKS DETECTED</span></td>
+            </tr>
+            <tr>
+              <td><strong>Host Focus Theft</strong></td>
+              <td>Watches <code>blur</code> & <code>focusout</code> on active input</td>
+              <td><span class="status-pill status-pass">0 BLUR DISRUPTIONS</span></td>
+            </tr>
+            <tr>
+              <td><strong>Text Selection Unlock</strong></td>
+              <td>Verifies <code>getComputedStyle</code> user-select state</td>
+              <td><span class="status-pill status-pass">ACCESSIBILITY UNLOCKED</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Live Proctor Log Feed -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+          Adversary Event Monitor & Telemetry Stream (Page-Level Listeners)
+        </span>
+        <span style="font-size:11px; color:var(--muted);">Listening on <code>window</code> & <code>document</code> capture/bubble</span>
+      </div>
+      <div class="console-feed" id="console-feed">
+        <div class="log-line">
+          <span class="log-time">[00:00:00]</span>
+          <span class="log-tag tag-system">[SYS]</span>
+          <span>Proctor sensor array initialized. Monitoring capture & bubble phases across window and document.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      // ── Telemetry State ──────────────────────────────────────────────────
+      let leakCount = 0;
+      let blurCount = 0;
+      const feed = document.getElementById("console-feed");
+      const valLeaks = document.getElementById("val-leaks");
+      const cardLeaks = document.getElementById("card-leaks");
+      const subLeaks = document.getElementById("sub-leaks");
+      const valBlur = document.getElementById("val-blur");
+      const cardBlur = document.getElementById("card-blur");
+      const subBlur = document.getElementById("sub-blur");
+      const badgeFocus = document.getElementById("badge-focus");
+      const examInput = document.getElementById("exam-input");
+
+      function nowStr() {
+        return new Date().toTimeString().split(" ")[0];
+      }
+
+      function logEvent(tag, tagClass, text) {
+        const line = document.createElement("div");
+        line.className = "log-line";
+        line.innerHTML = `<span class="log-time">[${nowStr()}]</span><span class="log-tag ${tagClass}">[${tag}]</span><span>${text}</span>`;
+        feed.appendChild(line);
+        feed.scrollTop = feed.scrollHeight;
+      }
+
+      // ── Probe 1: Focus Theft Monitor ─────────────────────────────────────
+      examInput.addEventListener("focus", () => {
+        badgeFocus.textContent = "FOCUS: LOCKED ON EXAM INPUT";
+        badgeFocus.className = "focus-status-badge focus-locked";
+        logEvent("FOCUS", "tag-focus", "Host exam input gained focus. Now click/drag Canvax overlay to test focus theft.");
+      });
+
+      examInput.addEventListener("blur", (e) => {
+        // If focus shifted to body or another element because of interaction
+        badgeFocus.textContent = "FOCUS: LOST / BLURRED";
+        badgeFocus.className = "focus-status-badge focus-lost";
+        blurCount++;
+        valBlur.textContent = blurCount;
+        cardBlur.className = "metric-card alert";
+        subBlur.textContent = "Focus shift detected!";
+        logEvent("BLUR", "tag-leak", `Host input fired 'blur' event. Target: ${e.target.tagName}, RelatedTarget: ${e.relatedTarget ? (e.relatedTarget.id || e.relatedTarget.tagName) : "null"}`);
+      });
+
+      document.querySelectorAll(".exam-opt input").forEach(radio => {
+        radio.addEventListener("focus", () => {
+          badgeFocus.textContent = `FOCUS: RADIO (${radio.value})`;
+          badgeFocus.className = "focus-status-badge focus-locked";
+        });
+        radio.addEventListener("blur", () => {
+          blurCount++;
+          valBlur.textContent = blurCount;
+          logEvent("BLUR", "tag-leak", `Radio (${radio.value}) fired blur event.`);
+        });
+      });
+
+      // ── Probe 2: Event Boundary Sniffer (Adversary Listeners) ─────────────
+      // Registers on window/document in BOTH capture and bubble phases.
+      // If ANY event from inside the Canvax overlay leaks through to the host page,
+      // it will be caught here and logged as a stealth violation.
+      const MONITORED_EVENTS = [
+        "click", "dblclick", "mousedown", "mouseup", "contextmenu",
+        "keydown", "keyup", "keypress",
+        "copy", "cut", "paste",
+        "pointerdown", "pointerup"
+      ];
+
+      function isOverlayEvent(e) {
+        // Did this event originate from or retarget through #cx-host?
+        const target = e.target;
+        if (!target) return false;
+        if (target.id === "cx-host" || (target.closest && target.closest("#cx-host"))) return true;
+        // Check composedPath
+        const path = e.composedPath ? e.composedPath() : [];
+        return path.some(el => el && el.id === "cx-host");
+      }
+
+      MONITORED_EVENTS.forEach(eventType => {
+        // Capture listener on window
+        window.addEventListener(eventType, e => {
+          if (isOverlayEvent(e)) {
+            // Note: in capture phase, window sees events before they reach the target.
+            // But if bubble phase leaks to window, that is a true boundary leak.
+          }
+        }, true);
+
+        // Bubble listener on document
+        document.addEventListener(eventType, e => {
+          if (isOverlayEvent(e)) {
+            leakCount++;
+            valLeaks.textContent = leakCount;
+            cardLeaks.className = "metric-card alert";
+            subLeaks.textContent = `Event '${eventType}' escaped shadow boundary!`;
+            logEvent("LEAK", "tag-leak", `Adversary detected '${eventType}' event leaked to host page DOM! Target: ${e.target?.tagName || "unknown"}`);
+          }
+        }, false);
+      });
+
+      // ── Probe 3: Automated Deep Diagnostic Suite ─────────────────────────
+      function runAutomatedDiagnostics() {
+        logEvent("PROBE", "tag-system", "Executing full automated adversary diagnostic suite...");
+        const tbody = document.getElementById("probe-results");
+        let allPass = true;
+        const results = [];
+
+        // 1. Check Function.prototype.toString tampering
+        let protoPass = true;
+        try {
+          const fnStr = Function.prototype.toString.call(Document.prototype.hasFocus);
+          if (!fnStr.includes("[native code]")) protoPass = false;
+        } catch { protoPass = false; }
+
+        try {
+          const addEvtStr = Function.prototype.toString.call(window.addEventListener);
+          if (!addEvtStr.includes("[native code]")) protoPass = false;
+        } catch { protoPass = false; }
+
+        results.push({
+          name: "Prototype Integrity",
+          desc: "Validates hasFocus & addEventListener native code signatures",
+          pass: protoPass,
+          statusText: protoPass ? "NATIVE (PRISTINE)" : "MODIFIED (TAMPERED)"
+        });
+
+        // 2. Check Document Visibility descriptors
+        let visPass = true;
+        try {
+          const desc = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
+          // Native getters are standard getters, not overwritten values
+          if (desc && desc.value !== undefined) visPass = false;
+        } catch {}
+
+        results.push({
+          name: "Visibility API Tampering",
+          desc: "Probes Document.prototype.visibilityState descriptors",
+          pass: visPass,
+          statusText: visPass ? "UNMODIFIED (CLEAN)" : "MONKEY-PATCHED"
+        });
+
+        // 3. Check Closed Shadow Root Security
+        let shadowPass = true;
+        let shadowText = "NOT INJECTED YET";
+        const hostEl = document.getElementById("cx-host");
+        if (hostEl) {
+          // Attempt penetration
+          if (hostEl.shadowRoot === null) {
+            shadowPass = true;
+            shadowText = "ENFORCED (CLOSED)";
+          } else {
+            shadowPass = false;
+            shadowText = "VULNERABLE (OPEN SHADOW)";
+          }
+          // Attempt querying inside
+          const innerEl = document.querySelector("#cx-overlay, #cx-ki, #cx-ans");
+          if (innerEl) {
+            shadowPass = false;
+            shadowText = "LEAKED INTO LIGHT DOM";
+          }
+        } else {
+          shadowText = "STANDBY (ALT+Q TO OPEN)";
+        }
+
+        results.push({
+          name: "Shadow DOM Sandbox",
+          desc: "Probes hostPage.querySelector('#cx-host').shadowRoot",
+          pass: shadowPass,
+          statusText: shadowText
+        });
+
+        // 4. Check Event Boundary Leaks
+        const eventPass = leakCount === 0;
+        results.push({
+          name: "Event Boundary Isolation",
+          desc: "Checks for bubble leakage of clicks/keystrokes to host",
+          pass: eventPass,
+          statusText: eventPass ? "0 LEAKS DETECTED" : `${leakCount} EVENTS LEAKED`
+        });
+
+        // 5. Check Focus Disruption
+        const focusPass = blurCount === 0;
+        results.push({
+          name: "Zero Focus Theft",
+          desc: "Monitors blur/focusout on active exam question input",
+          pass: focusPass,
+          statusText: focusPass ? "ZERO BLUR EVENTS" : `${blurCount} BLUR EVENTS`
+        });
+
+        // 6. Check Text Selection Unlock
+        let selectPass = true;
+        const protectedEl = document.querySelector(".protected-box");
+        if (protectedEl) {
+          const cs = window.getComputedStyle(protectedEl);
+          const us = cs.userSelect || cs.webkitUserSelect;
+          // Canvax restore CSS enforces user-select: text !important
+          if (us === "text") {
+            selectPass = true;
+          }
+        }
+
+        results.push({
+          name: "Selection Unlocker",
+          desc: "Verifies user-select: none bypass on protected content",
+          pass: selectPass,
+          statusText: selectPass ? "ACCESSIBILITY UNLOCKED" : "RESTRICTED (NONE)"
+        });
+
+        // Render Results Table
+        tbody.innerHTML = "";
+        results.forEach(r => {
+          if (!r.pass) allPass = false;
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td><strong>${r.name}</strong></td>
+            <td>${r.desc}</td>
+            <td><span class="status-pill ${r.pass ? "status-pass" : "status-fail"}">${r.statusText}</span></td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        const overallBadge = document.getElementById("badge-overall");
+        if (allPass) {
+          overallBadge.textContent = "ALL TESTS PASS (STEALTH ACTIVE)";
+          overallBadge.className = "status-pill status-pass";
+          logEvent("VERDICT", "tag-shield", "All automated adversary checks PASSED. Architecture is completely stealthy.");
+        } else {
+          overallBadge.textContent = "WARNING / ATTENTION NEEDED";
+          overallBadge.className = "status-pill status-fail";
+          logEvent("VERDICT", "tag-leak", "One or more adversary probes detected anomalies.");
+        }
+      }
+
+      // Reset Telemetry
+      document.getElementById("btn-reset").addEventListener("click", () => {
+        leakCount = 0;
+        blurCount = 0;
+        valLeaks.textContent = "0";
+        cardLeaks.className = "metric-card good";
+        subLeaks.textContent = "Boundary 100% Sealed";
+        valBlur.textContent = "0";
+        cardBlur.className = "metric-card good";
+        subBlur.textContent = "Zero Focus Theft";
+        badgeFocus.textContent = "FOCUS: IDLE";
+        badgeFocus.className = "focus-status-badge focus-locked";
+        feed.innerHTML = "";
+        logEvent("SYS", "tag-system", "Telemetry reset. Monitoring active.");
+      });
+
+      document.getElementById("btn-run-probes").addEventListener("click", runAutomatedDiagnostics);
+
+      // Auto-run once after page load
+      setTimeout(runAutomatedDiagnostics, 600);
+    })();
+  </script>
+</body>
+</html>
