@@ -173,7 +173,13 @@
   overlay.className = "cx-hidden"; // Start hidden until visibility preference is checked
   overlay.innerHTML = `
     <div id="cx-header">
-      <span id="cx-title">canvax</span>
+      <div class="cx-header-left">
+        <span id="cx-title">canvax</span>
+        <div id="cx-main-modes" class="cx-mode-pill-group">
+          <button class="cx-mode-pill active" data-mode="highlight" title="Auto-answers highlighted text on page">Highlight</button>
+          <button class="cx-mode-pill" data-mode="screen" title="Screen reader: scans visible page/canvas questions">Screen</button>
+        </div>
+      </div>
       <div class="cx-header-actions">
         <button id="cx-cfg" title="Settings">⚙</button>
         <button id="cx-close" title="Close">×</button>
@@ -666,14 +672,37 @@
   doneBtn.addEventListener("click", () => showMain()); // call by name so the screen-mode wrapper below applies
   rekeyBtn.addEventListener("click", showSetup);
 
-  // mode buttons
-  root.querySelectorAll("#cx-modes .cx-mode").forEach(btn => {
+  function setMode(mode, triggerScan = true) {
+    currentMode = mode;
+    root.querySelectorAll("#cx-modes .cx-mode, #cx-main-modes .cx-mode-pill").forEach(b => {
+      b.classList.toggle("active", b.dataset.mode === mode);
+    });
+    try { chrome.storage.local.set({ cxMode: mode }); } catch {}
+
+    if (bodyEl.style.display !== "none") {
+      if (mode === "screen") {
+        if (triggerScan) {
+          setStatus("scanning page...");
+          setTimeout(scanPage, 200);
+        }
+      } else {
+        setStatus("Highlight text or ask below");
+      }
+    }
+  }
+
+  // mode buttons (both header pill group and settings panel)
+  root.querySelectorAll("#cx-modes .cx-mode, #cx-main-modes .cx-mode-pill").forEach(btn => {
     btn.addEventListener("click", () => {
-      root.querySelectorAll("#cx-modes .cx-mode").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      currentMode = btn.dataset.mode;
+      setMode(btn.dataset.mode, true);
     });
   });
+
+  try {
+    chrome.storage.local.get("cxMode", d => {
+      if (d?.cxMode) setMode(d.cxMode, false);
+    });
+  } catch {}
 
   // ── Theme ───────────────────────────────────────────────────────────────
   let theme = "auto"; // "auto" (follows the page) | "light" | "dark"
