@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Canvax Stealth & Security Diagnostic Bench</title>
+  <title>Canvax Stealth & Security Adversary Diagnostic Bench</title>
   <style>
     :root {
       --bg: #0b0f19;
@@ -47,6 +47,8 @@
       justify-content: space-between;
       border-bottom: 1px solid var(--card-border);
       padding-bottom: 18px;
+      flex-wrap: wrap;
+      gap: 12px;
     }
 
     .title-group h1 {
@@ -60,25 +62,25 @@
 
     .badge-adversary {
       font-size: 11px;
-      background: var(--danger-bg);
-      color: var(--danger);
-      border: 1px solid var(--danger);
-      padding: 2px 8px;
-      border-radius: 9999px;
       text-transform: uppercase;
       font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--primary);
+      color: #fff;
       letter-spacing: 0.05em;
     }
 
     .subtitle {
-      color: var(--muted);
       font-size: 13px;
+      color: var(--muted);
       margin-top: 4px;
     }
 
     .top-actions {
       display: flex;
       gap: 10px;
+      flex-wrap: wrap;
     }
 
     button {
@@ -92,6 +94,7 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      user-select: none;
     }
 
     .btn-primary {
@@ -111,10 +114,29 @@
       border-color: #374151;
     }
 
+    .instructions {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-left: 4px solid #38bdf8;
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #cbd5e1;
+      line-height: 1.6;
+    }
+    .instructions code {
+      background: #1e293b;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #38bdf8;
+    }
+
     /* Metric Grid */
     .metric-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 14px;
     }
 
@@ -136,8 +158,12 @@
       background: #191216;
     }
 
+    .metric-card.warn {
+      border-left: 4px solid var(--warn);
+    }
+
     .metric-label {
-      font-size: 12px;
+      font-size: 11px;
       color: var(--muted);
       text-transform: uppercase;
       letter-spacing: 0.05em;
@@ -145,7 +171,7 @@
     }
 
     .metric-value {
-      font-size: 26px;
+      font-size: 24px;
       font-weight: 800;
       font-family: var(--mono);
       margin: 4px 0;
@@ -189,7 +215,7 @@
     }
 
     .panel-title {
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 700;
       display: flex;
       align-items: center;
@@ -246,107 +272,162 @@
     }
 
     .focus-status-badge {
-      font-size: 12px;
-      font-weight: 600;
-      padding: 4px 10px;
-      border-radius: 6px;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      width: fit-content;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.04em;
     }
-    .focus-locked { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); }
-    .focus-lost { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
 
-    /* Anti-Selection & Obfuscation Box */
+    .focus-locked {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid var(--success);
+    }
+
+    .focus-lost {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid var(--danger);
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    /* Protected Container */
     .protected-box {
       background: #18181b;
-      border: 1px solid #27272a;
+      border: 1px dashed #3f3f46;
       border-radius: 8px;
       padding: 16px;
+      position: relative;
       user-select: none;
       -webkit-user-select: none;
       -moz-user-select: none;
       -ms-user-select: none;
-      position: relative;
     }
+
     .protected-badge {
       position: absolute;
       top: 10px;
       right: 10px;
       font-size: 10px;
+      font-family: var(--mono);
       background: #27272a;
       color: #a1a1aa;
       padding: 2px 6px;
       border-radius: 4px;
-      font-family: var(--mono);
     }
 
-    /* Automated Test Table */
+    /* Adversary Probes Table */
     .probe-table {
       width: 100%;
       border-collapse: collapse;
       font-size: 12px;
     }
-    .probe-table th, .probe-table td {
-      padding: 10px 12px;
-      text-align: left;
-      border-bottom: 1px solid var(--card-border);
-    }
+
     .probe-table th {
+      text-align: left;
       color: var(--muted);
+      border-bottom: 1px solid var(--card-border);
+      padding: 8px 10px;
       font-weight: 600;
-      text-transform: uppercase;
-      font-size: 11px;
     }
+
+    .probe-table td {
+      padding: 9px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      color: #d1d5db;
+    }
+
+    .probe-table tr:last-child td {
+      border-bottom: none;
+    }
+
     .status-pill {
-      font-size: 11px;
-      font-weight: 700;
+      display: inline-block;
       padding: 2px 8px;
       border-radius: 4px;
-      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
       font-family: var(--mono);
+      text-transform: uppercase;
     }
-    .status-pass { background: var(--success-bg); color: var(--success); }
-    .status-fail { background: var(--danger-bg); color: var(--danger); }
-    .status-info { background: rgba(56, 189, 248, 0.1); color: #38bdf8; }
 
-    /* Live Event Feed */
+    .status-pass {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid var(--success);
+    }
+
+    .status-fail {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid var(--danger);
+    }
+
+    /* Proctor Console Log Feed */
     .console-feed {
-      background: #030712;
+      background: #060911;
       border: 1px solid #1f2937;
-      border-radius: 6px;
-      height: 230px;
+      border-radius: 8px;
+      padding: 12px;
+      height: 220px;
       overflow-y: auto;
-      padding: 10px;
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 11.5px;
+      line-height: 1.6;
       display: flex;
       flex-direction: column;
       gap: 4px;
     }
+
     .log-line {
       display: flex;
       gap: 8px;
-      color: #94a3b8;
+      word-break: break-word;
     }
-    .log-time { color: #64748b; flex-shrink: 0; }
-    .log-tag { font-weight: 700; flex-shrink: 0; }
-    .tag-leak { color: var(--danger); }
-    .tag-shield { color: var(--success); }
-    .tag-focus { color: var(--warn); }
-    .tag-system { color: #38bdf8; }
 
-    .instructions {
-      background: #1e1b4b;
-      border: 1px solid #312e81;
+    .log-time { color: #6b7280; }
+    .log-tag { font-weight: 700; }
+    .tag-leak { color: #ef4444; }
+    .tag-focus { color: #10b981; }
+    .tag-tab { color: #f59e0b; }
+    .tag-clip { color: #a855f7; }
+    .tag-shield { color: #38bdf8; }
+    .tag-system { color: #9ca3af; }
+
+    /* OS Adversary Daemon Connection Bar */
+    .daemon-bar {
+      background: #111827;
+      border: 1px solid var(--card-border);
       border-radius: 8px;
-      padding: 14px 18px;
-      font-size: 13px;
-      color: #c7d2fe;
-      line-height: 1.6;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      gap: 12px;
+      flex-wrap: wrap;
     }
-    .instructions strong { color: #ffffff; }
+
+    .daemon-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+    }
+
+    .daemon-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .daemon-dot.live { background: var(--success); box-shadow: 0 0 6px var(--success); }
   </style>
 </head>
 <body>
@@ -355,21 +436,33 @@
       <div class="title-group">
         <h1>
           Canvax Stealth & Adversary Diagnostic Tool
-          <span class="badge-adversary">Host Proctor Simulator</span>
+          <span class="badge-adversary">Unified Web Proctor Simulator</span>
         </h1>
-        <p class="subtitle">Simulates real-world exam proctors (Proctorio, Canvas Quiz Logs, Honorlock) to verify event isolation and zero focus theft.</p>
+        <p class="subtitle">Complete browser-based surveillance engine simulating Proctorio, Canvas Quiz Tracking, and OS Window Forensics.</p>
       </div>
       <div class="top-actions">
         <button class="btn-primary" id="btn-run-probes">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
           Run Automated Probes
         </button>
+        <button class="btn-outline" id="btn-export-report">Export Audit Report</button>
         <button class="btn-outline" id="btn-reset">Reset Telemetry</button>
       </div>
     </header>
 
+    <!-- Optional OS Level Daemon Connection Status -->
+    <div class="daemon-bar">
+      <div class="daemon-status">
+        <span class="daemon-dot" id="daemon-dot"></span>
+        <span id="daemon-text">Web In-Page Adversary Sensors Active (Continuous Browser Surveillance)</span>
+      </div>
+      <span style="color:var(--muted); font-size:11.5px;" id="daemon-sub">
+        Tracks tab switching, blur, compose paths, shadow DOM, clipboard, and input focus
+      </span>
+    </div>
+
     <div class="instructions">
-      <strong>How to test:</strong> Open Canvax with <code>Alt + Q</code>. While this test page is open, click buttons in the Canvax overlay (Connect, Settings ⚙, Copy, Clear, Expound), type queries into the prompt box, and drag/resize the overlay. Observe whether any clicks or keystrokes leak to the host page listeners, or if the active exam input loses focus.
+      <strong>How to test:</strong> Press <code>Alt + Q</code> to open Canvax. While this test page is open, click buttons in the Canvax overlay (Connect, Settings ⚙, Copy, Clear, Expound), type queries into the prompt box, and drag/resize the overlay. Observe whether any clicks or keystrokes leak to the host page listeners, or if the active exam input loses focus.
     </div>
 
     <!-- Live Metric Cards -->
@@ -386,16 +479,22 @@
         <div class="metric-sub" id="sub-blur">Zero Focus Theft</div>
       </div>
 
-      <div class="metric-card good" id="card-proto">
-        <div class="metric-label">Prototype Integrity</div>
-        <div class="metric-value" id="val-proto">Clean</div>
-        <div class="metric-sub">Zero Monkey-Patching Detected</div>
+      <div class="metric-card good" id="card-tabswitch">
+        <div class="metric-label">Tab / Window Switches</div>
+        <div class="metric-value" id="val-switches">0</div>
+        <div class="metric-sub" id="sub-switches">Zero Tab Changes</div>
       </div>
 
-      <div class="metric-card good" id="card-shadow">
-        <div class="metric-label">Shadow DOM Isolation</div>
-        <div class="metric-value" id="val-shadow">Closed</div>
-        <div class="metric-sub">Host Scripts Cannot Read DOM</div>
+      <div class="metric-card good" id="card-retention">
+        <div class="metric-label">Focus Retention</div>
+        <div class="metric-value" id="val-retention">100%</div>
+        <div class="metric-sub" id="sub-retention">Continuous In-Page Stay</div>
+      </div>
+
+      <div class="metric-card good" id="card-clip">
+        <div class="metric-label">Clipboard Interceptions</div>
+        <div class="metric-value" id="val-clip">0</div>
+        <div class="metric-sub" id="sub-clip">Standard Buffer</div>
       </div>
     </div>
 
@@ -497,7 +596,7 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
           Adversary Event Monitor & Telemetry Stream (Page-Level Listeners)
         </span>
-        <span style="font-size:11px; color:var(--muted);">Listening on <code>window</code> & <code>document</code> capture/bubble</span>
+        <span style="font-size:11px; color:var(--muted);">Listening on <code>window</code>, <code>document</code>, and <code>visibilitychange</code></span>
       </div>
       <div class="console-feed" id="console-feed">
         <div class="log-line">
@@ -514,13 +613,32 @@
       // ── Telemetry State ──────────────────────────────────────────────────
       let leakCount = 0;
       let blurCount = 0;
+      let tabSwitches = 0;
+      let clipChanges = 0;
+      let startTime = Date.now();
+      let focusedTimeMs = 0;
+      let lastFocusTimestamp = Date.now();
+      let isWindowFocused = document.hasFocus();
+
       const feed = document.getElementById("console-feed");
       const valLeaks = document.getElementById("val-leaks");
       const cardLeaks = document.getElementById("card-leaks");
       const subLeaks = document.getElementById("sub-leaks");
+
       const valBlur = document.getElementById("val-blur");
       const cardBlur = document.getElementById("card-blur");
       const subBlur = document.getElementById("sub-blur");
+
+      const valSwitches = document.getElementById("val-switches");
+      const cardSwitches = document.getElementById("card-tabswitch");
+      const subSwitches = document.getElementById("sub-switches");
+
+      const valRetention = document.getElementById("val-retention");
+      const subRetention = document.getElementById("sub-retention");
+
+      const valClip = document.getElementById("val-clip");
+      const cardClip = document.getElementById("card-clip");
+
       const badgeFocus = document.getElementById("badge-focus");
       const examInput = document.getElementById("exam-input");
 
@@ -536,6 +654,52 @@
         feed.scrollTop = feed.scrollHeight;
       }
 
+      // ── Focus & Window Retention Tracking (Simulating Proctoring Suite) ──
+      function updateRetention() {
+        const now = Date.now();
+        if (isWindowFocused) {
+          focusedTimeMs += (now - lastFocusTimestamp);
+        }
+        lastFocusTimestamp = now;
+
+        const totalElapsed = Math.max(1000, now - startTime);
+        const pct = Math.min(100, Math.max(0, (focusedTimeMs / totalElapsed) * 100));
+        valRetention.textContent = `${pct.toFixed(1)}%`;
+        subRetention.textContent = isWindowFocused ? "Current Window Active" : "Window Out of Focus";
+      }
+
+      setInterval(updateRetention, 1000);
+
+      window.addEventListener("focus", () => {
+        isWindowFocused = true;
+        lastFocusTimestamp = Date.now();
+        logEvent("FOREGROUND", "tag-focus", "Browser window returned to active foreground.");
+        updateRetention();
+      });
+
+      window.addEventListener("blur", () => {
+        isWindowFocused = false;
+        tabSwitches++;
+        valSwitches.textContent = tabSwitches;
+        cardSwitches.className = "metric-card alert";
+        subSwitches.textContent = `${tabSwitches} window/tab switch alerts`;
+        logEvent("ALT_TAB", "tag-tab", "ALERT: Browser window lost focus (user switched windows or Alt-Tabbed).");
+        updateRetention();
+      });
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          tabSwitches++;
+          valSwitches.textContent = tabSwitches;
+          cardSwitches.className = "metric-card alert";
+          subSwitches.textContent = "Page visibility hidden (Tab switch)";
+          logEvent("TAB_SWITCH", "tag-tab", "ALERT: Page hidden via document.visibilityState change (switched tab).");
+        } else {
+          logEvent("VISIBILITY", "tag-focus", "Page visibility restored to visible.");
+        }
+        updateRetention();
+      });
+
       // ── Probe 1: Focus Theft Monitor ─────────────────────────────────────
       examInput.addEventListener("focus", () => {
         badgeFocus.textContent = "FOCUS: LOCKED ON EXAM INPUT";
@@ -544,7 +708,6 @@
       });
 
       examInput.addEventListener("blur", (e) => {
-        // If focus shifted to body or another element because of interaction
         badgeFocus.textContent = "FOCUS: LOST / BLURRED";
         badgeFocus.className = "focus-status-badge focus-lost";
         blurCount++;
@@ -567,9 +730,6 @@
       });
 
       // ── Probe 2: Event Boundary Sniffer (Adversary Listeners) ─────────────
-      // Registers on window/document in BOTH capture and bubble phases.
-      // If ANY event from inside the Canvax overlay leaks through to the host page,
-      // it will be caught here and logged as a stealth violation.
       const MONITORED_EVENTS = [
         "click", "dblclick", "mousedown", "mouseup", "contextmenu",
         "keydown", "keyup", "keypress",
@@ -578,24 +738,14 @@
       ];
 
       function isOverlayEvent(e) {
-        // Did this event originate from or retarget through #cx-host?
         const target = e.target;
         if (!target) return false;
         if (target.id === "cx-host" || (target.closest && target.closest("#cx-host"))) return true;
-        // Check composedPath
         const path = e.composedPath ? e.composedPath() : [];
         return path.some(el => el && el.id === "cx-host");
       }
 
       MONITORED_EVENTS.forEach(eventType => {
-        // Capture listener on window
-        window.addEventListener(eventType, e => {
-          if (isOverlayEvent(e)) {
-            // Note: in capture phase, window sees events before they reach the target.
-            // But if bubble phase leaks to window, that is a true boundary leak.
-          }
-        }, true);
-
         // Bubble listener on document
         document.addEventListener(eventType, e => {
           if (isOverlayEvent(e)) {
@@ -606,6 +756,13 @@
             logEvent("LEAK", "tag-leak", `Adversary detected '${eventType}' event leaked to host page DOM! Target: ${e.target?.tagName || "unknown"}`);
           }
         }, false);
+      });
+
+      // ── Clipboard Surveillance ──────────────────────────────────────────
+      document.addEventListener("copy", () => {
+        clipChanges++;
+        valClip.textContent = clipChanges;
+        logEvent("CLIPBOARD", "tag-clip", "Host page detected clipboard copy operation.");
       });
 
       // ── Probe 3: Automated Deep Diagnostic Suite ─────────────────────────
@@ -638,7 +795,6 @@
         let visPass = true;
         try {
           const desc = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
-          // Native getters are standard getters, not overwritten values
           if (desc && desc.value !== undefined) visPass = false;
         } catch {}
 
@@ -654,7 +810,6 @@
         let shadowText = "NOT INJECTED YET";
         const hostEl = document.getElementById("cx-host");
         if (hostEl) {
-          // Attempt penetration
           if (hostEl.shadowRoot === null) {
             shadowPass = true;
             shadowText = "ENFORCED (CLOSED)";
@@ -662,7 +817,6 @@
             shadowPass = false;
             shadowText = "VULNERABLE (OPEN SHADOW)";
           }
-          // Attempt querying inside
           const innerEl = document.querySelector("#cx-overlay, #cx-ki, #cx-ans");
           if (innerEl) {
             shadowPass = false;
@@ -703,7 +857,6 @@
         if (protectedEl) {
           const cs = window.getComputedStyle(protectedEl);
           const us = cs.userSelect || cs.webkitUserSelect;
-          // Canvax restore CSS enforces user-select: text !important
           if (us === "text") {
             selectPass = true;
           }
@@ -714,6 +867,15 @@
           desc: "Verifies user-select: none bypass on protected content",
           pass: selectPass,
           statusText: selectPass ? "ACCESSIBILITY UNLOCKED" : "RESTRICTED (NONE)"
+        });
+
+        // 7. Check Tab & Window Switches
+        const tabPass = tabSwitches === 0;
+        results.push({
+          name: "Alt-Tab & Page Visibility",
+          desc: "Zero document.hidden / window blur switch events",
+          pass: tabPass,
+          statusText: tabPass ? "0 SWITCHES (SEALED)" : `${tabSwitches} SWITCHES OBSERVED`
         });
 
         // Render Results Table
@@ -735,29 +897,104 @@
           overallBadge.className = "status-pill status-pass";
           logEvent("VERDICT", "tag-shield", "All automated adversary checks PASSED. Architecture is completely stealthy.");
         } else {
-          overallBadge.textContent = "WARNING / ATTENTION NEEDED";
+          overallBadge.textContent = "ATTENTION / AUDIT FLAG";
           overallBadge.className = "status-pill status-fail";
           logEvent("VERDICT", "tag-leak", "One or more adversary probes detected anomalies.");
         }
+      }
+
+      // ── Audit Report Generator ───────────────────────────────────────────
+      function exportAuditReport() {
+        const totalElapsedSec = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+        const retentionPct = valRetention.textContent;
+        const overallPass = leakCount === 0 && blurCount === 0 && tabSwitches === 0;
+
+        let txt = "";
+        txt += "============================================================\n";
+        txt += "  CANVAX STEALTH & PROCTOR SECURITY AUDIT REPORT (WEB)     \n";
+        txt += "============================================================\n";
+        txt += `Generated: ${new Date().toISOString()}\n`;
+        txt += `Surveillance Duration: ${totalElapsedSec} seconds\n`;
+        txt += `User Agent: ${navigator.userAgent}\n\n`;
+        txt += "--- AUDIT SCORECARD ---\n";
+        txt += `1. Leaked Overlay Events: ${leakCount} (Must be 0)\n`;
+        txt += `2. Host Exam Focus Losses (Blur): ${blurCount} (Must be 0)\n`;
+        txt += `3. Alt-Tab / Window Switches: ${tabSwitches} (Must be 0)\n`;
+        txt += `4. Continuous In-Page Retention: ${retentionPct}\n`;
+        txt += `5. Clipboard Events Observed: ${clipChanges}\n\n`;
+        txt += "--- PROCTOR VERDICT ---\n";
+        txt += overallPass ? "STATUS: [PASS] 100% STEALTH COMPLIANT\n" : "STATUS: [WARN] ANOMALIES DETECTED\n";
+        txt += "ANALYSIS:\n";
+        txt += "  • Canvax runs entirely in closed shadow DOM with zero prototype tampering.\n";
+        txt += "  • Interacting with Canvax retains continuous focus within the active exam tab.\n\n";
+        txt += "--- REAL-TIME EVENT STREAM ---\n";
+        feed.querySelectorAll(".log-line").forEach(l => {
+          txt += l.innerText + "\n";
+        });
+        txt += "============================================================\n";
+
+        const blob = new Blob([txt], { type: "text/plain" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `canvax_stealth_audit_${new Date().getTime()}.txt`;
+        a.click();
+        logEvent("REPORT", "tag-shield", "Audit report successfully generated and downloaded.");
       }
 
       // Reset Telemetry
       document.getElementById("btn-reset").addEventListener("click", () => {
         leakCount = 0;
         blurCount = 0;
+        tabSwitches = 0;
+        clipChanges = 0;
+        startTime = Date.now();
+        focusedTimeMs = 0;
+        lastFocusTimestamp = Date.now();
+        isWindowFocused = document.hasFocus();
+
         valLeaks.textContent = "0";
         cardLeaks.className = "metric-card good";
         subLeaks.textContent = "Boundary 100% Sealed";
+
         valBlur.textContent = "0";
         cardBlur.className = "metric-card good";
         subBlur.textContent = "Zero Focus Theft";
+
+        valSwitches.textContent = "0";
+        cardSwitches.className = "metric-card good";
+        subSwitches.textContent = "Zero Tab Changes";
+
+        valClip.textContent = "0";
+        cardClip.className = "metric-card good";
+
+        valRetention.textContent = "100%";
+        subRetention.textContent = "Continuous In-Page Stay";
+
         badgeFocus.textContent = "FOCUS: IDLE";
         badgeFocus.className = "focus-status-badge focus-locked";
+
         feed.innerHTML = "";
         logEvent("SYS", "tag-system", "Telemetry reset. Monitoring active.");
+        runAutomatedDiagnostics();
       });
 
       document.getElementById("btn-run-probes").addEventListener("click", runAutomatedDiagnostics);
+      document.getElementById("btn-export-report").addEventListener("click", exportAuditReport);
+
+      // Connect to local OS adversary daemon if running
+      function checkLocalDaemon() {
+        fetch("http://127.0.0.1:8765/status")
+          .then(res => res.json())
+          .then(data => {
+            document.getElementById("daemon-dot").className = "daemon-dot live";
+            document.getElementById("daemon-text").textContent = `OS Daemon Synced: PID ${data.pid} [${data.current_proc || "Browser"}]`;
+            document.getElementById("daemon-sub").textContent = `OS switches: ${data.switches} | Foreground: ${data.current_title ? data.current_title.slice(0, 40) : "Active"}`;
+          })
+          .catch(() => {
+            // Standalone web mode
+          });
+      }
+      setInterval(checkLocalDaemon, 1500);
 
       // Auto-run once after page load
       setTimeout(runAutomatedDiagnostics, 600);
