@@ -4,8 +4,10 @@
   // Proctors probe DOM modifications and prototype tampering.
   // We use adoptedStyleSheets when supported or un-fingerprinted style tags.
   const RESTORE_CSS = `
-    body, p, span, div, h1, h2, h3, h4, h5, h6, li, td, th, label, blockquote, q, article, section {
+    *, *::before, *::after, html, body, p, span, div, h1, h2, h3, h4, h5, h6, li, td, th, label, blockquote, q, article, section, [class*='protect'], [class*='quiz'], [class*='exam'] {
       -webkit-user-select: text !important;
+      -moz-user-select: text !important;
+      -ms-user-select: text !important;
       user-select: text !important;
     }
   `;
@@ -20,7 +22,6 @@
           sheet.replaceSync(RESTORE_CSS);
           sheet._cxRestore = true;
           document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-          return;
         }
       }
     } catch {}
@@ -30,12 +31,24 @@
         const style = document.createElement("style");
         style.setAttribute("data-user-select-restore", "true");
         style.textContent = RESTORE_CSS;
-        (document.head || document.documentElement).appendChild(style);
+        (document.head || document.documentElement || document.body)?.appendChild(style);
       }
     } catch {}
   }
 
   ensureSelectionAllowed();
+
+  // Passive selection and copy enablers that unlock onselectstart / oncopy restrictions
+  // without modifying or monkey-patching Object or Element prototypes.
+  ["selectstart", "copy", "contextmenu"].forEach(evtName => {
+    window.addEventListener(evtName, e => {
+      e.stopPropagation();
+    }, true);
+    document.addEventListener(evtName, e => {
+      e.stopPropagation();
+    }, true);
+  });
+
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", ensureSelectionAllowed, { once: true });
   }
@@ -145,6 +158,21 @@
   if (document.getElementById("cx-host")) return;
 
   let visible = false, lastText = "", idleTimer = null, apiKey = null;
+  let lastHostActiveElement = null; // remembers host page input focus
+
+  function preserveHostFocus() {
+    if (document.activeElement && document.activeElement !== document.body && document.activeElement !== host) {
+      lastHostActiveElement = document.activeElement;
+    }
+  }
+
+  function restoreHostFocus() {
+    if (lastHostActiveElement && typeof lastHostActiveElement.focus === "function") {
+      try {
+        lastHostActiveElement.focus({ preventScroll: true });
+      } catch {}
+    }
+  }
   let currentProvider = "auto", currentModel = "auto";
   let currentMode = "highlight"; // "highlight" | "screen"
   let dragging = false, dragOX = 0, dragOY = 0;
@@ -1658,7 +1686,12 @@
     lastText = q;
 
     ask(fullPrompt, true, null, "manual");
+    promptIn.blur();
+    restoreHostFocus();
   }
+
+  promptIn.addEventListener("focus", preserveHostFocus);
+  keyIn.addEventListener("focus", preserveHostFocus);
 
   promptSend.addEventListener("click", sendManualPrompt);
   promptIn.addEventListener("keydown", e => {
@@ -1670,6 +1703,7 @@
       e.preventDefault();
       e.stopPropagation();
       promptIn.blur();
+      restoreHostFocus();
     }
   });
 
@@ -1831,19 +1865,20 @@
     "pointerdown", "pointerup", "pointercancel", "contextmenu"
   ];
 
-  // Interactive controls that must process clicks, touch taps, and key input
-  const INTERACTIVE_SELECTOR = "input, textarea, select, option, a, button, [role='button'], .cx-mode, .cx-cp, #cx-tag, #cx-sel";
+  // Interactive controls that require genuine native focus to accept text entry
+  const TEXT_INPUT_SELECTOR = "input, textarea, [contenteditable='true']";
 
   POINTER_EVENTS.forEach(type => {
     // Capture phase: side effects only (no stopPropagation here so controls receive events).
     overlay.addEventListener(type, e => {
       if (type === "mousedown") {
-        const isInteractive = !!e.target?.closest?.(INTERACTIVE_SELECTOR);
+        const isTextInput = !!e.target?.closest?.(TEXT_INPUT_SELECTOR);
         const isTouch = e.pointerType === "touch";
-        // Allow focus and interaction on form controls, dropdowns, and buttons inside the overlay.
-        // Prevent default only on non-interactive backdrop/drag/read areas to prevent focus theft from host.
-        // Never call preventDefault on interactive controls or touch events (preventDefault on touch suppresses click).
-        if (!isInteractive && !isTouch) {
+        // Buttons, dropdowns, mode toggles, and backdrop do NOT need to steal focus
+        // from the host page. In modern browsers, e.preventDefault() on mousedown
+        // allows the button click event to fire normally while keeping activeElement on the page.
+        // Only text inputs (typing an API key or follow-up prompt) need focus.
+        if (!isTextInput && !isTouch) {
           e.preventDefault();
         }
       }
