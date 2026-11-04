@@ -1868,17 +1868,85 @@
   // Interactive controls that require genuine native focus to accept text entry
   const TEXT_INPUT_SELECTOR = "input, textarea, [contenteditable='true']";
 
+  let promptVirtualActive = false;
+
+  promptIn.addEventListener("click", () => {
+    promptVirtualActive = true;
+    promptWrap.classList.add("cx-virtual-focus");
+    preserveHostFocus();
+  });
+
+  function deactivatePromptVirtual() {
+    promptVirtualActive = false;
+    promptWrap.classList.remove("cx-virtual-focus");
+  }
+
+  // Intercept keydown on window in capture phase when promptVirtualActive is true
+  // so typing goes straight into promptIn while activeElement NEVER leaves the host input!
+  window.addEventListener("keydown", e => {
+    if (!promptVirtualActive) return;
+
+    // Stop host page from receiving any keystrokes meant for Canvax prompt
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      deactivatePromptVirtual();
+      sendManualPrompt();
+      return;
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      deactivatePromptVirtual();
+      return;
+    }
+
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      promptIn.value = promptIn.value.slice(0, -1);
+      return;
+    }
+
+    // Printable single characters
+    if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      promptIn.value += e.key;
+      return;
+    }
+  }, true);
+
+  // Deactivate virtual typing if clicking outside Canvax
+  window.addEventListener("mousedown", e => {
+    if (promptVirtualActive) {
+      const path = e.composedPath ? e.composedPath() : [];
+      if (!path.includes(host)) {
+        deactivatePromptVirtual();
+      }
+    }
+  }, true);
+
   POINTER_EVENTS.forEach(type => {
     // Capture phase: side effects only (no stopPropagation here so controls receive events).
     overlay.addEventListener(type, e => {
       if (type === "mousedown") {
-        const isTextInput = !!e.target?.closest?.(TEXT_INPUT_SELECTOR);
+        const isSetupInput = !!e.target?.closest?.("#cx-ki");
+        const isPromptIn = !!e.target?.closest?.("#cx-prompt-in, #cx-prompt-wrap");
         const isTouch = e.pointerType === "touch";
-        // Buttons, dropdowns, mode toggles, and backdrop do NOT need to steal focus
-        // from the host page. In modern browsers, e.preventDefault() on mousedown
-        // allows the button click event to fire normally while keeping activeElement on the page.
-        // Only text inputs (typing an API key or follow-up prompt) need focus.
-        if (!isTextInput && !isTouch) {
+
+        if (isPromptIn) {
+          // Virtual focus: prevent default so the host page activeElement NEVER blurs!
+          e.preventDefault();
+          promptVirtualActive = true;
+          promptWrap.classList.add("cx-virtual-focus");
+          preserveHostFocus();
+          return;
+        }
+
+        // On the connect screen (API key setup), focus is permitted if user is setting up.
+        // On all other controls, preventDefault prevents focus loss on the host page.
+        if (!isSetupInput && !isTouch) {
           e.preventDefault();
         }
       }

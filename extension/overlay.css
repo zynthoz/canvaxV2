@@ -497,7 +497,8 @@
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-#cx-prompt-wrap:focus-within {
+#cx-prompt-wrap:focus-within,
+#cx-prompt-wrap.cx-virtual-focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px var(--primary-subtle);
 }
