@@ -30,8 +30,127 @@ chrome.commands.onCommand.addListener(command => {
   }
 });
 
+// ── Fetch available models dynamically for a provider & key ────────────
+async function fetchModelsForProvider(provider, apiKey) {
+  if (!apiKey || !apiKey.trim()) return [];
+  const key = apiKey.trim();
+
+  try {
+    if (provider === "gemini") {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" }
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message || `Gemini API returned ${res.status}`);
+      }
+      const data = await res.json();
+      const models = (data.models || [])
+        .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes("generateContent"))
+        .map(m => {
+          const rawId = (m.name || "").replace(/^models\//, "");
+          const cleanName = m.displayName || rawId;
+          return { id: rawId, label: cleanName };
+        })
+        .filter(m => m.id && !m.id.includes("embedding") && !m.id.includes("aqa"));
+
+      // Sort models: flash & newer versions first, then alphabetical
+      models.sort((a, b) => {
+        const aFlash = a.id.includes("flash") ? 1 : 0;
+        const bFlash = b.id.includes("flash") ? 1 : 0;
+        if (aFlash !== bFlash) return bFlash - aFlash;
+        return a.id.localeCompare(b.id);
+      });
+      return models;
+    }
+
+    if (provider === "openai") {
+      const res = await fetch("https://api.openai.com/v1/models", {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${key}`,
+          "Content-Type": "application/json"
+        }
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message || `OpenAI API returned ${res.status}`);
+      }
+      const data = await res.json();
+      // Filter for chat / instruction models
+      const chatRe = /^(gpt-|chatgpt-|o1|o3|o4)/i;
+      const models = (data.data || [])
+        .map(m => m.id)
+        .filter(id => chatRe.test(id) && !id.includes("realtime") && !id.includes("audio") && !id.includes("transcription"))
+        .map(id => ({ id, label: id }));
+
+      models.sort((a, b) => {
+        const aMini = a.id.includes("mini") ? 1 : 0;
+        const bMini = b.id.includes("mini") ? 1 : 0;
+        if (aMini !== bMini) return bMini - aMini;
+        return a.id.localeCompare(b.id);
+      });
+      return models;
+    }
+
+    if (provider === "groq") {
+      const res = await fetch("https://api.groq.com/openai/v1/models", {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${key}`,
+          "Content-Type": "application/json"
+        }
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message || `Groq API returned ${res.status}`);
+      }
+      const data = await res.json();
+      const models = (data.data || [])
+        .filter(m => m.active !== false)
+        .map(m => m.id)
+        .filter(id => !id.includes("whisper") && !id.includes("tts") && !id.includes("embedding"))
+        .map(id => ({ id, label: id }));
+      return models;
+    }
+
+    if (provider === "anthropic") {
+      const res = await fetch("https://api.anthropic.com/v1/models", {
+        method: "GET",
+        headers: {
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        }
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message || `Anthropic API returned ${res.status}`);
+      }
+      const data = await res.json();
+      const models = (data.data || [])
+        .map(m => ({ id: m.id, label: m.display_name || m.id }));
+      return models;
+    }
+  } catch (err) {
+    console.warn(`[canvax] Failed to auto-detect models for ${provider}:`, err.message);
+    throw err;
+  }
+
+  return [];
+}
+
 // ── Storage and visibility message handlers ─────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "FETCH_MODELS") {
+    const prov = (msg.provider && msg.provider !== "auto") ? msg.provider : detectProvider(msg.apiKey);
+    fetchModelsForProvider(prov, msg.apiKey)
+      .then(models => sendResponse({ ok: true, provider: prov, models }))
+      .catch(err => sendResponse({ ok: false, provider: prov, error: err.message }));
+    return true;
+  }
+
   if (msg.type === "SAVE_KEY") {
     const data = { geminiKey: msg.apiKey };
     if (msg.provider !== undefined) data.cxProvider = msg.provider;
