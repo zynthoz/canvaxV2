@@ -194,6 +194,12 @@
           <option value="groq">Groq (Ultra-fast)</option>
         </select>
       </div>
+      <div class="cx-set-row" style="margin-bottom:2px">
+        <span class="cx-set-label">Model</span>
+        <select id="cx-setup-model" class="cx-select">
+          <option value="auto">Auto (from key)</option>
+        </select>
+      </div>
       <input id="cx-ki" type="password" placeholder="AIzaSy... / sk-... / gsk_..." autocomplete="off" spellcheck="false" />
       <div id="cx-setup-btns">
         <button id="cx-kb" style="display:none">Back</button>
@@ -317,6 +323,7 @@
   const ctxTxt    = $("cx-ctx-txt");
   const ctxDel    = $("cx-ctx-del");
   const setupProv = $("cx-setup-prov");
+  const setupModel= $("cx-setup-model");
   const provSel   = $("cx-prov-sel");
   const modelSel  = $("cx-model-sel");
 
@@ -342,18 +349,94 @@
     ]
   };
 
-  function updateModelDropdown(prov, selected) {
-    if (!modelSel) return;
-    const effectiveProv = (prov && prov !== "auto") ? prov : detectKeyProvider(keyIn.value || apiKey || "");
-    const list = PROVIDER_MODEL_CHOICES[effectiveProv] || PROVIDER_MODEL_CHOICES.gemini;
-    modelSel.innerHTML = "";
+  const dynamicModelsByProvider = {
+    gemini: null,
+    openai: null,
+    anthropic: null,
+    groq: null
+  };
+  let fetchModelsTimer = null;
+  let fetchingModels = false;
+
+  function populateSelect(selectEl, list, selected) {
+    if (!selectEl) return;
+    selectEl.innerHTML = "";
     list.forEach(m => {
       const opt = document.createElement("option");
       opt.value = m.id;
       opt.textContent = m.label;
       if (m.id === selected) opt.selected = true;
-      modelSel.appendChild(opt);
+      selectEl.appendChild(opt);
     });
+    if (selected && selectEl.value !== selected) {
+      // If selected wasn't matched, either keep first or create custom option
+      if (selected !== "auto") {
+        const customOpt = document.createElement("option");
+        customOpt.value = selected;
+        customOpt.textContent = selected;
+        customOpt.selected = true;
+        selectEl.insertBefore(customOpt, selectEl.firstChild.nextSibling);
+      }
+    }
+  }
+
+  function updateModelDropdown(prov, selected) {
+    const effectiveProv = (prov && prov !== "auto") ? prov : detectKeyProvider(keyIn.value || apiKey || "");
+    const baseList = dynamicModelsByProvider[effectiveProv] || PROVIDER_MODEL_CHOICES[effectiveProv] || PROVIDER_MODEL_CHOICES.gemini;
+    const effectiveSelected = selected || currentModel || "auto";
+
+    if (modelSel) populateSelect(modelSel, baseList, effectiveSelected);
+    if (setupModel) populateSelect(setupModel, baseList, effectiveSelected);
+  }
+
+  function autoDetectModels(k, prov) {
+    const key = (k || apiKey || "").trim();
+    if (!key || key.length < 8) return;
+    const effectiveProv = (prov && prov !== "auto") ? prov : detectKeyProvider(key);
+
+    const markLoading = sel => {
+      if (!sel) return;
+      const cur = sel.value;
+      sel.innerHTML = `<option value="${cur}">Loading models...</option>`;
+    };
+    markLoading(modelSel);
+    markLoading(setupModel);
+
+    fetchingModels = true;
+    try {
+      chrome.runtime.sendMessage({
+        type: "FETCH_MODELS",
+        provider: effectiveProv,
+        apiKey: key
+      }, res => {
+        fetchingModels = false;
+        if (chrome.runtime.lastError) {
+          updateModelDropdown(effectiveProv, currentModel);
+          return;
+        }
+        if (res?.ok && Array.isArray(res.models) && res.models.length > 0) {
+          const autoOpt = effectiveProv === "gemini"
+            ? { id: "auto", label: "Auto (Fast Failover & Hedging)" }
+            : { id: "auto", label: `Auto (Default: ${res.models[0].id})` };
+          dynamicModelsByProvider[effectiveProv] = [autoOpt, ...res.models];
+          updateModelDropdown(effectiveProv, currentModel);
+        } else {
+          updateModelDropdown(effectiveProv, currentModel);
+        }
+      });
+    } catch {
+      fetchingModels = false;
+      updateModelDropdown(effectiveProv, currentModel);
+    }
+  }
+
+  function scheduleAutoDetectModels(delay = 400) {
+    clearTimeout(fetchModelsTimer);
+    fetchModelsTimer = setTimeout(() => {
+      const k = keyIn.value || apiKey || "";
+      const p = setupProv?.value || provSel?.value || "auto";
+      autoDetectModels(k, p);
+    }, delay);
   }
 
   function detectKeyProvider(k) {
@@ -377,12 +460,27 @@
     updateSetupPlaceholders();
     if (provSel) provSel.value = setupProv.value;
     updateModelDropdown(setupProv.value, currentModel);
+    scheduleAutoDetectModels(50);
+  });
+
+  setupModel?.addEventListener("change", () => {
+    currentModel = setupModel.value;
+    if (modelSel) modelSel.value = currentModel;
+    try { chrome.storage.local.set({ cxProvider: setupProv?.value || "auto", cxModel: currentModel }); } catch {}
+    try {
+      chrome.runtime.sendMessage({
+        type: "SET_CONFIG",
+        provider: setupProv?.value || "auto",
+        model: currentModel
+      });
+    } catch {}
   });
 
   provSel?.addEventListener("change", () => {
     currentProvider = provSel.value;
     if (setupProv) setupProv.value = currentProvider;
     updateModelDropdown(currentProvider, currentModel);
+    scheduleAutoDetectModels(50);
     try { chrome.storage.local.set({ cxProvider: currentProvider, cxModel: modelSel?.value || "auto" }); } catch {}
     try {
       chrome.runtime.sendMessage({
@@ -395,6 +493,7 @@
 
   modelSel?.addEventListener("change", () => {
     currentModel = modelSel.value;
+    if (setupModel) setupModel.value = currentModel;
     try { chrome.storage.local.set({ cxProvider: provSel?.value || "auto", cxModel: currentModel }); } catch {}
     try {
       chrome.runtime.sendMessage({
@@ -419,11 +518,14 @@
     keyIn.value = "";
     if (setupProv) setupProv.value = currentProvider;
     updateSetupPlaceholders();
+    updateModelDropdown(currentProvider, currentModel);
+    if (apiKey) scheduleAutoDetectModels(50);
   }
   function showSettings() {
     hideAll3(); settingsEl.style.display = "flex";
     if (provSel) provSel.value = currentProvider;
     updateModelDropdown(currentProvider, currentModel);
+    if (apiKey) scheduleAutoDetectModels(50);
   }
 
   // ── Init ────────────────────────────────────────────────────────────────
@@ -435,6 +537,7 @@
       if (provSel) provSel.value = currentProvider;
       if (setupProv) setupProv.value = currentProvider;
       updateModelDropdown(currentProvider, currentModel);
+      scheduleAutoDetectModels(100);
       showMain();
       return true;
     }
@@ -471,7 +574,7 @@
     ksBtn.disabled = true;
     ksBtn.textContent = "...";
     const selectedProv = setupProv?.value || "auto";
-    const selectedModel = currentModel || "auto";
+    const selectedModel = setupModel?.value || currentModel || "auto";
 
     let completed = false;
     function finalizeSuccess() {
@@ -547,6 +650,10 @@
   keyIn.addEventListener("input", () => {
     if (setupProv && setupProv.value === "auto") {
       updateSetupPlaceholders();
+    }
+    const val = keyIn.value.trim();
+    if (val.length >= 8) {
+      scheduleAutoDetectModels(500);
     }
   });
   kbBtn.addEventListener("click", () => { if (apiKey) showMain(); });
